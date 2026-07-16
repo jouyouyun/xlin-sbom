@@ -59,7 +59,7 @@ docker compose run --rm linx-xiling -i /app/data/<镜像文件.iso> -o /app/outp
 docker compose run --rm linx-xiling -p /app/data/<软件包文件> -o /app/output --format linx --format spdx
 ```
 
-源码包在 v1.1.0 中已经拆分为独立处理策略。其中 `.src.rpm` 会继续使用 RPM spec 信息并支持源码文件级扫描；tar、zip 源码归档会安全解压后进行文件级许可证扫描，并通过内置 OSV Scanner 识别常见语言生态的依赖信息。生成 GBT 格式时，源码归档依赖会优先使用 OSV Scanner 结果中每个组件自己的 ecosystem 查询漏洞，`--ecosystem` 仅作为缺少组件生态系统时的兜底值。若源码归档中缺少依赖清单文件，或运行环境无法访问 OSV 在线服务，依赖结果可能为空，但工具仍会保留可获取的包级、文件级和许可证 SBOM。Debian `.dsc` 会生成可从描述文件中获取的包级 SBOM。
+源码包在 v1.1.0 中已经拆分为独立处理策略。其中 `.src.rpm` 会继续使用 RPM spec 信息并支持源码文件级扫描；tar、zip 源码归档会安全解压后进行文件级许可证扫描，并通过内置 OSV Scanner 识别常见语言生态的依赖信息。生成 SBOMDF（GB/T 47020-2026）格式时，源码归档依赖会优先使用 OSV Scanner 结果中每个组件自己的 ecosystem 查询漏洞，`--ecosystem` 仅作为缺少组件生态系统时的兜底值。若源码归档中缺少依赖清单文件，或运行环境无法访问 OSV 在线服务，依赖结果可能为空，但工具仍会保留可获取的包级、文件级和许可证 SBOM。Debian `.dsc` 会生成可从描述文件中获取的包级 SBOM。
 
 源码文件级扫描默认读取配置文件中的 `source_scan.include_file_patterns`，仅扫描常见源码文件和许可证/版权声明文件。用户可修改宿主机上的 `./config/config.json` 调整 include、exclude、线程数、进度条和源码扫描精简模式等运行参数。
 
@@ -91,7 +91,7 @@ Docker 镜像扫描对象是已安装的系统包数据库；如果镜像内没�
 docker compose run --rm linx-xiling -r https://mirrors.example.com/centos/8-stream/BaseOS/x86_64/os/ -o /app/output --format linx --format spdx
 ```
 
-软件源元数据通常只能提供包和许可证等包级信息，无法可靠提供包内文件、文件关系和包间依赖关系，因此 repo 扫描仅输出可从仓库元数据获取的清单内容。由于 GB/T 47020-2026 格式需要软件信息，repo 扫描不支持 `--format gbt`。
+软件源元数据通常只能提供包和许可证等包级信息，无法可靠提供包内文件、文件关系和包间依赖关系，因此 repo 扫描仅输出可从仓库元数据获取的清单内容。由于 SBOMDF（GB/T 47020-2026）格式需要软件信息，repo 扫描不支持 `--format sbomdf`。
 
 ## 输出格式
 
@@ -113,23 +113,31 @@ docker compose run --rm linx-xiling -p /app/data/example.rpm -o /app/output --fo
 docker compose run --rm linx-xiling -p /app/data/example.rpm -o /app/output --format linx --format spdx
 ```
 
-输出 GB/T 47020-2026 格式：
+输出 SBOMDF（GB/T 47020-2026）格式：
 
 ```bash
-docker compose run --rm linx-xiling -p /app/data/example.rpm -o /app/output --format gbt --ecosystem PyPI
+docker compose run --rm linx-xiling -p /app/data/example.rpm -o /app/output --format sbomdf --ecosystem PyPI
 ```
 
-生成 GBT 格式时，除 tar、zip 等源码归档外，必须通过 `--ecosystem` 指定 OSV 生态系统，用于从本地 Elasticsearch 漏洞库查询安全漏洞。源码归档可以省略该参数，工具会优先使用 OSV Scanner 输出的组件 ecosystem；若用户同时提供 `--ecosystem`，仅在组件缺少 ecosystem 时作为兜底值。可用生态系统可在析灵 SBOM 分析工具本地环境中通过 `docker compose run --rm es-manager list-ecosystems` 查看。
+生成 SBOMDF 格式时，除 tar、zip 等源码归档外，必须通过 `--ecosystem` 指定 OSV 生态系统，用于从本地 Elasticsearch 漏洞库查询安全漏洞。源码归档可以省略该参数，工具会优先使用 OSV Scanner 输出的组件 ecosystem；若用户同时提供 `--ecosystem`，仅在组件缺少 ecosystem 时作为兜底值。可用生态系统可在析灵 SBOM 分析工具本地环境中通过 `docker compose run --rm es-manager list-ecosystems` 查看。
 
-Linx 格式会输出到一个目录中，并按清单类型拆分为 `packages`、`files`、`licenses`、`package_relationships`、`file_relationships` 等 JSON 文件。SPDX 格式会输出为一个 SPDX 2.3 JSON 文件。GBT 格式会输出到独立目录，目录中包含 `*.SBOMDF.json`、`signature.sig` 和 `certification.pem`。
+Linx 格式会输出到一个目录中，并按清单类型拆分为 `packages`、`files`、`licenses`、`package_relationships`、`file_relationships` 等 JSON 文件。SPDX 相关格式与产物如下（详细差异见 [`docs/SPDX_FORMATS.md`](docs/SPDX_FORMATS.md)）：
+
+| `--format` | 产物 |
+| --- | --- |
+| `linx` | `linx-sbom_*` 多文件目录 |
+| `spdx22` | `spdx22-sbom_*.json`（SPDX 2.2） |
+| `spdx` / `spdx23` | `spdx-sbom_*.json`（SPDX 2.3；二者等价，只写出一份） |
+| `spdx3` | `spdx3-sbom_*.jsonld`（SPDX 3.0 JSON-LD） |
+| `sbomdf` | `sbomdf-sbom_*` 目录，含 `*.SBOMDF.json`、`signature.sig`、`certification.pem` |
 
 ## 可选参数
 
 | 参数 | 说明 |
 | --- | --- |
 | `--help`, `-h` | 显示帮助信息并退出 |
-| `--format {linx,spdx,gbt}` | 必填。指定输出格式，可重复指定 |
-| `--ecosystem <生态系统>` | 生成 GBT 格式时用于 OSV/Elasticsearch 漏洞查询；源码归档可省略，其他扫描对象必填 |
+| `--format {linx,spdx,spdx22,spdx23,spdx3,sbomdf}` | 必填。指定输出格式，可重复指定；`spdx` 与 `spdx23` 为 SPDX 2.3 别名 |
+| `--ecosystem <生态系统>` | 生成 SBOMDF 格式时用于 OSV/Elasticsearch 漏洞查询；源码归档可省略，其他扫描对象必填 |
 
 ## 配置文件
 
