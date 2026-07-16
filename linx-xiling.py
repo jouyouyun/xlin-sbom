@@ -44,7 +44,11 @@ from actions.scanner.repo_helper import (
     find_primary_xml_in_repo,
     find_deb_sources_in_repo
 )
-from actions.scanner.spdx_sbom_helper import convert_to_spdx
+from actions.scanner.spdx_sbom_helper import (
+    convert_to_spdx_document,
+    write_spdx22,
+    write_spdx23,
+)
 from actions.scanner.gbt_sbom_helper import (
     CERTIFICATE_FILE_NAME,
     SIGNATURE_FILE_NAME,
@@ -78,10 +82,11 @@ def parse_arguments():
                                           help="Docker Hub 镜像名或离线 Docker 镜像 tar 文件路径。")
     parser.add_argument("--output", "-o", required=True, help="SBOM清单输出目录。")
     parser.add_argument("--format", "-f", action='append', required=True,
-                        choices=("linx", "spdx", "gbt"),
-                        help="SBOM output format. Can be repeated.")
+                        choices=("linx", "spdx", "spdx22", "spdx23", "gbt"),
+                        help="SBOM output format. Can be repeated. "
+                             "'spdx' and 'spdx23' are aliases for SPDX 2.3.")
     parser.add_argument("--ecosystem",
-                        help="OSV ecosystem used by GBT vulnerability queries. Required for non-source-archive GBT output; used as a fallback when component ecosystem is unavailable.")
+                        help="OSV ecosystem used by SBOMDF vulnerability queries. Required for non-source-archive SBOMDF output; used as a fallback when component ecosystem is unavailable.")
 
     return parser.parse_args()
 
@@ -197,12 +202,12 @@ def validate_output_request(args, output_formats):
     if "gbt" not in output_formats:
         return
     if args.repo is not None:
-        logging.error("软件源扫描缺少软件信息，不支持生成 GBT 格式 SBOM。")
+        logging.error("软件源扫描缺少软件信息，不支持生成 SBOMDF 格式 SBOM。")
         sys.exit(1)
     if _is_source_archive_request(args):
         return
     if not args.ecosystem:
-        logging.error("生成 GBT 格式 SBOM 必须通过 --ecosystem 指定 OSV 生态系统；源码归档可省略并使用 OSV Scanner 依赖生态系统。")
+        logging.error("生成 SBOMDF 格式 SBOM 必须通过 --ecosystem 指定 OSV 生态系统；源码归档可省略并使用 OSV Scanner 依赖生态系统。")
         sys.exit(1)
 
 
@@ -237,7 +242,7 @@ def save_sbom(
         spdx_timestamp (str): SPDX 时间戳，用于生成 SPDX SBOM。
         output_dir (str): 保存 SBOM 文件的目标目录。
         output_formats (list[str]): 需要生成的输出格式列表。
-        ecosystem (str | None): GBT 漏洞查询使用的 OSV 生态系统。
+        ecosystem (str | None): SBOMDF 漏洞查询使用的 OSV 生态系统。
         config (dict | None): 运行配置。
         scan_mode (str | None): 扫描模式。
         source_path (str | None): 原始扫描目标路径。
@@ -245,6 +250,8 @@ def save_sbom(
     Returns:
         None: 函数不返回任何内容。
     """
+
+    output_formats = resolve_output_formats(output_formats)
 
     sbom_path = os.path.join(output_dir, filename)
     os.makedirs(sbom_path, exist_ok=True)
@@ -271,12 +278,28 @@ def save_sbom(
                           os.path.join(linx_sbom_path, linx_sbom_file_relationships_filename))
         logging.info(f"{linx_sbom_dirname} 已被保存至 {output_dir}")
 
-    if "spdx" in output_formats:
-        spdx_sbom = convert_to_spdx(
-            linx_sbom, filename, spdx_timestamp, package_type)
-        spdx_sbom_filename = f"spdx-sbom_{filename}_{utc_timestamp}.json"
-        save_data_to_json(spdx_sbom, os.path.join(sbom_path, spdx_sbom_filename))
-        logging.info(f"{spdx_sbom_filename} 已被保存至 {output_dir}")
+    if "spdx23" in output_formats or "spdx" in output_formats:
+        try:
+            document = convert_to_spdx_document(
+                linx_sbom, filename, spdx_timestamp, package_type,
+                spdx_version="SPDX-2.3")
+            spdx_sbom_filename = f"spdx-sbom_{filename}_{utc_timestamp}.json"
+            write_spdx23(document, os.path.join(sbom_path, spdx_sbom_filename))
+            logging.info(f"{spdx_sbom_filename} 已被保存至 {output_dir}")
+        except (ValueError, KeyError, TypeError) as exc:
+            logging.error(f"SPDX 2.3 写出失败（不影响其他格式）: {exc}")
+
+    if "spdx22" in output_formats:
+        try:
+            document = convert_to_spdx_document(
+                linx_sbom, filename, spdx_timestamp, package_type,
+                spdx_version="SPDX-2.2")
+            spdx22_filename = f"spdx22-sbom_{filename}_{utc_timestamp}.json"
+            write_spdx22(document, os.path.join(sbom_path, spdx22_filename))
+            logging.info(f"{spdx22_filename} 已被保存至 {output_dir}")
+        except (ValueError, KeyError, TypeError) as exc:
+            logging.error(f"SPDX 2.2 写出失败（不影响其他格式）: {exc}")
+
 
     if "gbt" in output_formats:
         gbt_sbom_dirname = f"gbt-sbom_{filename}_{utc_timestamp}"
@@ -295,6 +318,7 @@ def save_sbom(
         logging.info(f"{gbt_sbom_dirname} 已被保存至 {output_dir}")
 
 
+
 def resolve_output_formats(formats):
     """解析用户指定的 SBOM 输出格式。
 
@@ -302,10 +326,13 @@ def resolve_output_formats(formats):
         formats (list[str]): 命令行传入的输出格式列表。
 
     Returns:
-        list[str]: 去重后的输出格式列表。
+        list[str]: 去重后的输出格式列表。``spdx`` 与 ``spdx23`` 合并为 ``spdx23``。
     """
 
-    return list(dict.fromkeys(formats))
+    normalized = []
+    for fmt in formats:
+        normalized.append("spdx23" if fmt == "spdx" else fmt)
+    return list(dict.fromkeys(normalized))
 
 
 def main():
