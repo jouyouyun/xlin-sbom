@@ -45,11 +45,11 @@ from actions.scanner.repo_helper import (
     find_deb_sources_in_repo
 )
 from actions.scanner.spdx_sbom_helper import convert_to_spdx
-from actions.scanner.gbt_sbom_helper import (
+from actions.scanner.sbomdf_helper import (
     CERTIFICATE_FILE_NAME,
     SIGNATURE_FILE_NAME,
-    convert_to_gbt,
-    sign_gbt_sbom
+    convert_to_sbomdf,
+    sign_sbomdf
 )
 
 def parse_arguments():
@@ -78,7 +78,7 @@ def parse_arguments():
                                           help="Docker Hub 镜像名或离线 Docker 镜像 tar 文件路径。")
     parser.add_argument("--output", "-o", required=True, help="SBOM清单输出目录。")
     parser.add_argument("--format", "-f", action='append', required=True,
-                        choices=("linx", "spdx", "gbt"),
+                        choices=("linx", "spdx", "sbomdf"),
                         help="SBOM output format. Can be repeated.")
     parser.add_argument("--ecosystem",
                         help="OSV ecosystem used by GBT vulnerability queries. Required for non-source-archive GBT output; used as a fallback when component ecosystem is unavailable.")
@@ -194,7 +194,7 @@ def validate_output_request(args, output_formats):
         None
     """
 
-    if "gbt" not in output_formats:
+    if "sbomdf" not in output_formats:
         return
     if args.repo is not None:
         logging.error("软件源扫描缺少软件信息，不支持生成 GBT 格式 SBOM。")
@@ -278,21 +278,21 @@ def save_sbom(
         save_data_to_json(spdx_sbom, os.path.join(sbom_path, spdx_sbom_filename))
         logging.info(f"{spdx_sbom_filename} 已被保存至 {output_dir}")
 
-    if "gbt" in output_formats:
-        gbt_sbom_dirname = f"gbt-sbom_{filename}_{utc_timestamp}"
-        gbt_sbom_filename = f"gbt-sbom_{filename}_{utc_timestamp}.SBOMDF.json"
-        gbt_sbom_path = os.path.join(sbom_path, gbt_sbom_dirname)
-        os.makedirs(gbt_sbom_path, exist_ok=True)
+    if "sbomdf" in output_formats:
+        sbomdf_sbom_dirname = f"sbomdf-sbom_{filename}_{utc_timestamp}"
+        sbomdf_sbom_filename = f"sbomdf-sbom_{filename}_{utc_timestamp}.SBOMDF.json"
+        sbomdf_sbom_path = os.path.join(sbom_path, sbomdf_sbom_dirname)
+        os.makedirs(sbomdf_sbom_path, exist_ok=True)
 
-        gbt_sbom = convert_to_gbt(
+        sbomdf_sbom = convert_to_sbomdf(
             linx_sbom, filename, spdx_timestamp, package_type,
             scan_mode or "package", ecosystem, config or {}, source_path)
-        gbt_json_path = os.path.join(gbt_sbom_path, gbt_sbom_filename)
-        signature_path = os.path.join(gbt_sbom_path, SIGNATURE_FILE_NAME)
-        certificate_path = os.path.join(gbt_sbom_path, CERTIFICATE_FILE_NAME)
-        save_data_to_json(gbt_sbom, gbt_json_path)
-        sign_gbt_sbom(gbt_json_path, signature_path, certificate_path)
-        logging.info(f"{gbt_sbom_dirname} 已被保存至 {output_dir}")
+        sbomdf_json_path = os.path.join(sbomdf_sbom_path, sbomdf_sbom_filename)
+        signature_path = os.path.join(sbomdf_sbom_path, SIGNATURE_FILE_NAME)
+        certificate_path = os.path.join(sbomdf_sbom_path, CERTIFICATE_FILE_NAME)
+        save_data_to_json(sbomdf_sbom, sbomdf_json_path)
+        sign_sbomdf(sbomdf_json_path, signature_path, certificate_path)
+        logging.info(f"{sbomdf_sbom_dirname} 已被保存至 {output_dir}")
 
 
 def resolve_output_formats(formats):

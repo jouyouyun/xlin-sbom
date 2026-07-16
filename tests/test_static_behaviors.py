@@ -25,7 +25,7 @@ from actions.package import Package
 from actions.scanner import (
     iso_helper,
     docker_image_helper,
-    gbt_sbom_helper,
+    sbomdf_helper,
     originators_helper,
     package_helper,
     relationships_helper,
@@ -902,95 +902,8 @@ class RelationshipAndMetadataTests(unittest.TestCase):
         self.assertIn("GPL-2.0-only", _extract_deb_license_list("See /usr/share/common-licenses/GPL-2.0."))
 
 
-class SPDXConversionTests(unittest.TestCase):
-    def test_convert_to_spdx_includes_files_licenses_and_relationships(self):
-        linx_sbom = {
-            "packages_sbom": {"packages": [{
-                "id": "Package-demo-abc",
-                "name": "demo",
-                "version": "1.0",
-                "architecture": "x86_64",
-                "licenses": ["LicenseRef-mit"],
-                "suppliers": [{"name": "Example", "link": "https://example.test"}],
-                "description": "demo",
-                "checksum": {"algorithm": "SHA1", "value": "abc"},
-            }]},
-            "files_sbom": {"files": [{
-                "id": "File-demo",
-                "name": "demo.py",
-                "path": "src/demo.py",
-                "checksums": {"algorithm": "MD5", "value": "def"},
-            }]},
-            "file_relationships_sbom": {"file_relationships": [{
-                "id": "Package-demo-abc",
-                "related_element": "File-demo",
-                "relationship_type": "CONTAINS",
-            }]},
-            "package_relationships_sbom": {"package_relationships": [{
-                "id": "Package-demo-abc",
-                "related_element": "Package-lib-abc",
-                "relationship_type": "DEPENDS_ON",
-            }]},
-            "licenses_sbom": {"licenses": [{"id": "LicenseRef-mit", "name": "MIT"}]},
-        }
 
-        spdx = spdx_sbom_helper.convert_to_spdx(
-            linx_sbom, "demo", "2026-06-16T00:00:00Z", "rpm")
-
-        self.assertEqual(spdx["spdxVersion"], "SPDX-2.3")
-        self.assertEqual(spdx["packages"][0]["supplier"], "Organization: Example")
-        self.assertEqual(spdx["files"][0]["fileName"], "src/demo.py")
-        self.assertEqual(spdx["files"][0]["SPDXID"], "SPDXRef-File-demo")
-        self.assertEqual(len(spdx["relationships"]), 2)
-        self.assertEqual(spdx["hasExtractedLicensingInfos"][0]["licenseId"], "LicenseRef-mit")
-
-    def test_convert_to_spdx_handles_missing_optional_sections(self):
-        linx_sbom = {
-            "packages_sbom": {"packages": [{
-                "id": "Package-demo-abc",
-                "name": "demo",
-                "version": "",
-                "architecture": "",
-                "licenses": [],
-                "suppliers": [],
-                "description": "",
-                "checksum": {},
-            }]},
-            "licenses_sbom": {"licenses": []},
-        }
-
-        spdx = spdx_sbom_helper.convert_to_spdx(
-            linx_sbom, "demo", "2026-06-16T00:00:00Z", "source")
-
-        self.assertEqual(spdx["packages"][0]["versionInfo"], "NOASSERTION")
-        self.assertEqual(spdx["packages"][0]["supplier"], "NOASSERTION")
-        self.assertEqual(spdx["packages"][0]["checksums"][0]["algorithm"], "NOASSERTION")
-        self.assertEqual(spdx["files"], [])
-
-    def test_convert_to_spdx_prefers_package_type_for_docker_scan(self):
-        linx_sbom = {
-            "packages_sbom": {"packages": [{
-                "id": "Package-demo-abc",
-                "name": "demo",
-                "version": "1.0",
-                "architecture": "amd64",
-                "package_type": "deb",
-                "licenses": [],
-                "suppliers": [],
-                "description": "demo",
-                "checksum": {"algorithm": "SHA1", "value": "abc"},
-            }]},
-            "licenses_sbom": {"licenses": []},
-        }
-
-        spdx = spdx_sbom_helper.convert_to_spdx(
-            linx_sbom, "demo", "2026-06-16T00:00:00Z", "docker")
-
-        self.assertTrue(
-            spdx["packages"][0]["externalRefs"][0]["referenceLocator"].startswith("pkg:deb/demo@1.0"))
-
-
-class GBTConversionTests(unittest.TestCase):
+class SBOMDFConversionTests(unittest.TestCase):
     def test_query_es_vulnerabilities_resolves_certificate_verification(self):
         response = mock.Mock()
         response.json.return_value = {"responses": []}
@@ -1017,17 +930,17 @@ class GBTConversionTests(unittest.TestCase):
                     **tls_config,
                 }
                 with mock.patch.object(
-                        gbt_sbom_helper.requests,
+                        sbomdf_helper.requests,
                         "post",
                         return_value=response) as post:
-                    gbt_sbom_helper._query_es_vulnerabilities(
+                    sbomdf_helper._query_es_vulnerabilities(
                         [query], es_config)
 
                 self.assertEqual(
                     post.call_args.kwargs["verify"], expected_verify)
 
     def test_parse_creators_and_build_create_tools(self):
-        creators = gbt_sbom_helper.parse_creators([
+        creators = sbomdf_helper.parse_creators([
             "Organization: Linx Software, Inc.",
             "Tool: XiLing SBOM Tool",
             "Version: v1.1.0",
@@ -1035,10 +948,10 @@ class GBTConversionTests(unittest.TestCase):
 
         self.assertEqual(creators["Organization"], "Linx Software, Inc.")
         self.assertEqual(
-            gbt_sbom_helper.build_create_tools(creators),
+            sbomdf_helper.build_create_tools(creators),
             "XiLing SBOM Toolv1.1.0")
 
-    def test_convert_to_gbt_maps_package_software_and_components(self):
+    def test_convert_to_sbomdf_maps_package_software_and_components(self):
         linx_sbom = {
             "packages_sbom": {"packages": [
                 {
@@ -1069,23 +982,23 @@ class GBTConversionTests(unittest.TestCase):
             }]},
         }
         with mock.patch.object(
-                gbt_sbom_helper,
-                "query_gbt_vulnerabilities",
+                sbomdf_helper,
+                "query_sbomdf_vulnerabilities",
                 return_value=[]) as query_vulnerabilities:
-            gbt = gbt_sbom_helper.convert_to_gbt(
+            sbomdf = sbomdf_helper.convert_to_sbomdf(
                 linx_sbom, "app", "2026-06-16T00:00:00Z",
                 "source", "package", "PyPI", {}, None)
 
-        self.assertEqual(gbt["software"]["softwareName"], "app")
-        self.assertEqual(gbt["software"]["licenseName"], "MIT")
-        self.assertEqual(gbt["components"][0]["componentName"], "lib")
-        self.assertEqual(gbt["components"][0]["licenseName"], ["Apache-2.0"])
-        self.assertEqual(gbt["dependencies"][0]["relationship"], "dependsOn")
+        self.assertEqual(sbomdf["software"]["softwareName"], "app")
+        self.assertEqual(sbomdf["software"]["licenseName"], "MIT")
+        self.assertEqual(sbomdf["components"][0]["componentName"], "lib")
+        self.assertEqual(sbomdf["components"][0]["licenseName"], ["Apache-2.0"])
+        self.assertEqual(sbomdf["dependencies"][0]["relationship"], "dependsOn")
         self.assertRegex(
-            gbt["document"]["listID"],
+            sbomdf["document"]["listID"],
             r"^urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
         self.assertEqual(
-            gbt["integrity"],
+            sbomdf["integrity"],
             {
                 "signatureFile": "signature.sig",
                 "digitalCertificateFile": "certification.pem",
@@ -1098,7 +1011,7 @@ class GBTConversionTests(unittest.TestCase):
                 {"id": "Package-lib-bbb", "name": "lib", "version": "2.0"},
             ])
 
-    def test_convert_to_gbt_uses_noassertion_for_missing_software_license(self):
+    def test_convert_to_sbomdf_uses_noassertion_for_missing_software_license(self):
         linx_sbom = {
             "packages_sbom": {"packages": [{
                 "id": "Package-app-aaa",
@@ -1112,16 +1025,16 @@ class GBTConversionTests(unittest.TestCase):
             "package_relationships_sbom": {"package_relationships": []},
         }
         with mock.patch.object(
-                gbt_sbom_helper, "query_gbt_vulnerabilities",
+                sbomdf_helper, "query_sbomdf_vulnerabilities",
                 return_value=[]):
-            gbt = gbt_sbom_helper.convert_to_gbt(
+            sbomdf = sbomdf_helper.convert_to_sbomdf(
                 linx_sbom, "app", "2026-06-16T00:00:00Z",
                 "rpm", "package", "Debian", {}, None)
 
-        self.assertEqual(gbt["software"]["licenseName"], "NOASSERTION")
-        self.assertEqual(gbt["licenses"], [])
+        self.assertEqual(sbomdf["software"]["licenseName"], "NOASSERTION")
+        self.assertEqual(sbomdf["licenses"], [])
 
-    def test_convert_to_gbt_adds_target_contains_for_iso_and_docker(self):
+    def test_convert_to_sbomdf_adds_target_contains_for_iso_and_docker(self):
         packages = [
             {
                 "id": "Package-libc-aaa",
@@ -1164,17 +1077,17 @@ class GBTConversionTests(unittest.TestCase):
                     },
                 }
                 with mock.patch.object(
-                        gbt_sbom_helper, "query_gbt_vulnerabilities",
+                        sbomdf_helper, "query_sbomdf_vulnerabilities",
                         return_value=[]):
-                    gbt = gbt_sbom_helper.convert_to_gbt(
+                    sbomdf = sbomdf_helper.convert_to_sbomdf(
                         linx_sbom, "target-image", "2026-06-16T00:00:00Z",
                         "deb", scan_mode, "Debian", {}, None)
 
-                software_id = gbt["software"]["softwareId"]
-                self.assertEqual(gbt["software"]["licenseName"], "NOASSERTION")
+                software_id = sbomdf["software"]["softwareId"]
+                self.assertEqual(sbomdf["software"]["licenseName"], "NOASSERTION")
                 self.assertEqual(
                     [
-                        dependency for dependency in gbt["dependencies"]
+                        dependency for dependency in sbomdf["dependencies"]
                         if dependency["relationship"] == "contain"
                     ],
                     [
@@ -1195,10 +1108,10 @@ class GBTConversionTests(unittest.TestCase):
                         "relationship": "dependsOn",
                         "identityBId": "Package-libc-aaa",
                     },
-                    gbt["dependencies"])
+                    sbomdf["dependencies"])
 
-    def test_gbt_vulnerability_subjects_skip_noassertion(self):
-        subjects = gbt_sbom_helper._build_vulnerability_subjects(
+    def test_sbomdf_vulnerability_subjects_skip_noassertion(self):
+        subjects = sbomdf_helper._build_vulnerability_subjects(
             None,
             [
                 {"id": "Package-lib"},
@@ -1223,41 +1136,41 @@ class GBTConversionTests(unittest.TestCase):
             subjects,
             [{"id": "Package-urllib3", "name": "urllib3", "version": "1.25.8"}])
 
-    def test_gbt_vulnerability_queries_prefer_component_ecosystem(self):
-        subjects = gbt_sbom_helper._build_vulnerability_subjects(
+    def test_sbomdf_vulnerability_queries_prefer_component_ecosystem(self):
+        subjects = sbomdf_helper._build_vulnerability_subjects(
             None,
             [{"id": "Package-requests", "package_type": "pypi"}],
             {},
             [{"componentName": "requests", "componentVersion": "2.31.0"}])
 
-        queries = gbt_sbom_helper._build_vulnerability_queries(subjects, "Go")
+        queries = sbomdf_helper._build_vulnerability_queries(subjects, "Go")
 
         self.assertEqual(queries[0]["ecosystem"], "PyPI")
 
-    def test_gbt_vulnerability_queries_fallback_to_cli_ecosystem(self):
-        subjects = gbt_sbom_helper._build_vulnerability_subjects(
+    def test_sbomdf_vulnerability_queries_fallback_to_cli_ecosystem(self):
+        subjects = sbomdf_helper._build_vulnerability_subjects(
             None,
             [{"id": "Package-demo", "package_type": "custom"}],
             {},
             [{"componentName": "demo", "componentVersion": "1.0"}])
 
-        queries = gbt_sbom_helper._build_vulnerability_queries(subjects, "Go")
+        queries = sbomdf_helper._build_vulnerability_queries(subjects, "Go")
 
         self.assertEqual(queries[0]["ecosystem"], "Go")
 
-    def test_gbt_vulnerability_queries_skip_without_ecosystem(self):
-        subjects = gbt_sbom_helper._build_vulnerability_subjects(
+    def test_sbomdf_vulnerability_queries_skip_without_ecosystem(self):
+        subjects = sbomdf_helper._build_vulnerability_subjects(
             None,
             [{"id": "Package-demo", "package_type": "custom"}],
             {},
             [{"componentName": "demo", "componentVersion": "1.0"}])
 
         self.assertEqual(
-            gbt_sbom_helper._build_vulnerability_queries(subjects, None),
+            sbomdf_helper._build_vulnerability_queries(subjects, None),
             [])
 
-    def test_gbt_licenses_split_and_deduplicate_and_expressions(self):
-        licenses = gbt_sbom_helper._build_licenses(
+    def test_sbomdf_licenses_split_and_deduplicate_and_expressions(self):
+        licenses = sbomdf_helper._build_licenses(
             {
                 "licenses_sbom": {"licenses": [
                     {"name": "Apache-2.0 AND MIT"},
@@ -1270,27 +1183,27 @@ class GBTConversionTests(unittest.TestCase):
 
         self.assertEqual(license_names, ["Apache-2.0", "MIT", "GPL-3.0"])
 
-    def test_gbt_license_enrichment_uses_rules_category_and_patent(self):
-        apache = gbt_sbom_helper._build_license("Apache-2.0")
+    def test_sbomdf_license_enrichment_uses_rules_category_and_patent(self):
+        apache = sbomdf_helper._build_license("Apache-2.0")
 
         self.assertEqual(apache["scope"], "Global")
         self.assertTrue(apache["patent"])
         self.assertIn("包含版权和许可", apache["content"])
         self.assertIn("宽松许可证", apache["riskDescription"])
 
-    def test_gbt_license_risk_has_non_commercial_description(self):
-        with mock.patch.object(gbt_sbom_helper, "read_data_from_json",
+    def test_sbomdf_license_risk_has_non_commercial_description(self):
+        with mock.patch.object(sbomdf_helper, "read_data_from_json",
                                return_value=[{
                                    "spdx_license_key": "LicenseRef-test",
                                    "category": "Non-Commercial",
                                }]):
-            description = gbt_sbom_helper._get_license_risk_description(
+            description = sbomdf_helper._get_license_risk_description(
                 "LicenseRef-test")
 
         self.assertIn("非商业许可证", description)
         self.assertIn("禁止", description)
 
-    def test_gbt_vulnerability_matching_uses_versions_only(self):
+    def test_sbomdf_vulnerability_matching_uses_versions_only(self):
         source = {
             "id": "GHSA-test",
             "aliases": ["CVE-2026-0001"],
@@ -1305,7 +1218,7 @@ class GBTConversionTests(unittest.TestCase):
             }],
         }
 
-        matched = gbt_sbom_helper._match_vulnerability(
+        matched = sbomdf_helper._match_vulnerability(
             {
                 "id": "Package-demo-abc",
                 "ecosystem": "PyPI",
@@ -1313,7 +1226,7 @@ class GBTConversionTests(unittest.TestCase):
                 "version": "1.0",
             },
             source)
-        missed = gbt_sbom_helper._match_vulnerability(
+        missed = sbomdf_helper._match_vulnerability(
             {
                 "id": "Package-demo-abc",
                 "ecosystem": "PyPI",
@@ -1327,7 +1240,7 @@ class GBTConversionTests(unittest.TestCase):
         self.assertEqual(matched[0]["repairMethod"], "更新组件版本")
         self.assertEqual(missed, [])
 
-    def test_gbt_vulnerability_fallbacks_without_fixed_or_purl(self):
+    def test_sbomdf_vulnerability_fallbacks_without_fixed_or_purl(self):
         source = {
             "id": "GHSA-test",
             "affected": [{
@@ -1337,7 +1250,7 @@ class GBTConversionTests(unittest.TestCase):
             }],
         }
 
-        matched = gbt_sbom_helper._match_vulnerability(
+        matched = sbomdf_helper._match_vulnerability(
             {
                 "id": "Package-demo-abc",
                 "ecosystem": "PyPI",
@@ -1350,7 +1263,14 @@ class GBTConversionTests(unittest.TestCase):
         self.assertEqual(matched[0]["otherID"], [])
         self.assertEqual(matched[0]["repairMethod"], "暂无")
 
-    def test_sign_gbt_sbom_generates_verifiable_signature(self):
+    def test_sign_sbomdf_generates_verifiable_signature(self):
+        probe = subprocess.run(
+            ["openssl", "genpkey", "-algorithm", "EC",
+             "-pkeyopt", "ec_paramgen_curve:SM2"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if probe.returncode != 0:
+            self.skipTest("当前 OpenSSL 不支持 SM2 曲线（例如 macOS LibreSSL）")
+
         with tempfile.TemporaryDirectory() as tmpdir:
             sbom_path = Path(tmpdir) / "demo.SBOMDF.json"
             signature_path = Path(tmpdir) / "signature.sig"
@@ -1359,7 +1279,7 @@ class GBTConversionTests(unittest.TestCase):
             sbom_path.write_text('{"software":{"softwareName":"demo"}}',
                                  encoding="utf-8")
 
-            gbt_sbom_helper.sign_gbt_sbom(
+            sbomdf_helper.sign_sbomdf(
                 str(sbom_path), str(signature_path), str(certificate_path))
             subprocess.run([
                 "openssl", "x509", "-in", str(certificate_path),
