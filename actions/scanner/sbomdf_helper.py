@@ -121,7 +121,7 @@ LICENSE_CATEGORY_DETAILS = [
 ]
 
 
-def convert_to_gbt(
+def convert_to_sbomdf(
     linx_sbom: Dict[str, Any],
     filename: str,
     created_time: str,
@@ -162,7 +162,7 @@ def convert_to_gbt(
     licenses = _build_licenses(linx_sbom, software, components)
     vulnerability_subjects = _build_vulnerability_subjects(
         software_package, component_packages, software, components)
-    vulnerabilities = query_gbt_vulnerabilities(
+    vulnerabilities = query_sbomdf_vulnerabilities(
         vulnerability_subjects, ecosystem, config)
     creators = parse_creators(read_data_from_json(CREATORS_FILE_PATH))
 
@@ -219,11 +219,11 @@ def build_create_tools(creators: Dict[str, str]) -> str:
     tool = creators.get("Tool", "XiLing SBOM Tool")
     version = creators.get("Version", "")
     if not version:
-        logging.warning("creators.json 缺少 Version 字段，GBT createTools 将仅使用工具名称")
+        logging.warning("creators.json 缺少 Version 字段，SBOMDF createTools 将仅使用工具名称")
     return f"{tool}{version}" if version else tool
 
 
-def query_gbt_vulnerabilities(
+def query_sbomdf_vulnerabilities(
     packages: List[Dict[str, Any]],
     ecosystem: Optional[str],
     config: Dict[str, Any],
@@ -247,7 +247,7 @@ def query_gbt_vulnerabilities(
     try:
         raw_results = _query_es_vulnerabilities(queries, es_config)
     except Exception as exc:
-        logging.warning(f"GBT 漏洞信息查询失败，将输出空漏洞列表: {exc}")
+        logging.warning(f"SBOMDF 漏洞信息查询失败，将输出空漏洞列表: {exc}")
         return []
 
     vulnerabilities = []
@@ -265,7 +265,7 @@ def query_gbt_vulnerabilities(
     return vulnerabilities
 
 
-def sign_gbt_sbom(sbom_path: str, signature_path: str, certificate_path: str) -> None:
+def sign_sbomdf(sbom_path: str, signature_path: str, certificate_path: str) -> None:
     """使用 OpenSSL SM2/SM3 为国标 SBOM 文件生成签名和证书。
 
     Args:
@@ -281,7 +281,7 @@ def sign_gbt_sbom(sbom_path: str, signature_path: str, certificate_path: str) ->
     """
 
     try:
-        with tempfile.TemporaryDirectory(prefix="linx_gbt_sign_") as temp_dir:
+        with tempfile.TemporaryDirectory(prefix="linx_sbomdf_sign_") as temp_dir:
             private_key_path = os.path.join(temp_dir, "private.key")
             _run_openssl([
                 "openssl", "genpkey", "-algorithm", "EC",
@@ -302,7 +302,7 @@ def sign_gbt_sbom(sbom_path: str, signature_path: str, certificate_path: str) ->
                 sbom_path,
             ])
     except FileNotFoundError as exc:
-        raise RuntimeError("未找到 OpenSSL，无法生成 GBT SBOM 签名文件") from exc
+        raise RuntimeError("未找到 OpenSSL，无法生成 SBOMDF 签名文件") from exc
     except subprocess.CalledProcessError as exc:
         message = exc.stderr.decode("utf-8", errors="replace") if exc.stderr else str(exc)
         raise RuntimeError(f"OpenSSL SM2/SM3 签名失败: {message}") from exc
