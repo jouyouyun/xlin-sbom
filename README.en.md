@@ -78,7 +78,7 @@ Source archives are unpacked safely for file-level license scanning. The bundled
 
 ### 3. Docker Image Scan (`--docker` / `-d`)
 
-Scans a public Docker Hub image or an offline Docker image tar archive. The scanner analyzes the final image filesystem, reads dpkg or RPM package databases, and generates Linx, SPDX, or GBT SBOM output.
+Scans a public Docker Hub image or an offline Docker image tar archive. The scanner analyzes the final image filesystem, reads dpkg or RPM package databases, and generates Linx, SPDX, or SBOMDF (GB/T 47020-2026) SBOM output.
 
 **Docker Hub image**:
 
@@ -102,7 +102,7 @@ Docker image scanning depends on installed package databases in the final filesy
 
 Scans a specified software repository URL (such as a YUM/APT repository), recursively analyzes all software packages within the repository, and generates a comprehensive SBOM.
 
-Repository metadata does not provide reliable software-level information, so repository scans do not support `--format gbt`.
+Repository metadata does not provide reliable software-level information, so repository scans do not support `--format sbomdf`.
 
 **Command Format**:
 
@@ -122,21 +122,25 @@ docker compose run --rm linx-xiling -r https://mirrors.example.com/centos/8-stre
 
 ## Optional Parameters
 
+> **Breaking change:** `--format gbt` has been renamed to `--format sbomdf` with no compatibility alias. Output directory prefixes changed from `gbt-sbom_*` to `sbomdf-sbom_*`.
+
 In addition to the required scan mode and output parameters, the CLI keeps the following arguments:
 
 | Parameter | Description |
 | --- | --- |
 | `--help`, `-h` | Show help message and exit |
-| `--format {linx,spdx,gbt}` | Required output format; can be repeated |
-| `--ecosystem <ecosystem>` | Required for GBT output; used for OSV/Elasticsearch vulnerability queries |
+| `--format {linx,spdx,spdx22,spdx23,spdx3,sbomdf}` | Required output format; can be repeated. `spdx` and `spdx23` are SPDX 2.3 aliases |
+| `--ecosystem <ecosystem>` | Required for SBOMDF output; used for OSV/Elasticsearch vulnerability queries |
 
-GBT output example:
+Supported formats (see [`docs/SPDX_FORMATS.md`](docs/SPDX_FORMATS.md)): `linx`, `spdx22` (SPDX 2.2), `spdx`/`spdx23` (SPDX 2.3), `spdx3` (SPDX 3.0 JSON-LD), `sbomdf` (GB/T 47020-2026).
+
+SBOMDF (GB/T 47020-2026) output example:
 
 ```bash
-docker compose run --rm linx-xiling -p /app/data/example.rpm -o /app/output --format gbt --ecosystem PyPI
+docker compose run --rm linx-xiling -p /app/data/example.rpm -o /app/output --format sbomdf --ecosystem PyPI
 ```
 
-GBT output requires `--ecosystem` so the tool can query vulnerabilities from the local OSV Elasticsearch database. The generated GBT directory contains `*.SBOMDF.json`, `signature.sig`, and `certification.pem`.
+SBOMDF output requires `--ecosystem` so the tool can query vulnerabilities from the local OSV Elasticsearch database. The generated SBOMDF directory contains `*.SBOMDF.json`, `signature.sig`, and `certification.pem`.
 
 ---
 

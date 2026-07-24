@@ -33,6 +33,17 @@ class OutputFormatTests(unittest.TestCase):
             self.cli.resolve_output_formats(["spdx", "sbomdf", "linx", "spdx"]),
             ["spdx", "sbomdf", "linx"])
 
+
+    def test_resolve_output_formats_deduplicates_user_choices(self):
+        self.assertEqual(
+            self.cli.resolve_output_formats(["spdx", "gbt", "linx", "spdx"]),
+            ["spdx23", "gbt", "linx"])
+
+    def test_resolve_output_formats_merges_spdx_aliases(self):
+        self.assertEqual(
+            self.cli.resolve_output_formats(["spdx", "spdx23", "spdx22"]),
+            ["spdx23", "spdx22"])
+
     def test_save_sbom_can_write_only_spdx(self):
         linx_sbom = {
             "packages_sbom": {
@@ -55,7 +66,7 @@ class OutputFormatTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             self.cli.save_sbom(
                 linx_sbom, "rpm", "demo", "20260616000000",
-                "2026-06-16T00:00:00Z", tmpdir, ["spdx"])
+                "2026-06-16T00:00:00Z", tmpdir, ["spdx23"])
             output_dir = Path(tmpdir) / "demo"
             self.assertTrue((output_dir / "spdx-sbom_demo_20260616000000.json").exists())
             self.assertFalse(any(output_dir.glob("linx-sbom_*")))
@@ -286,7 +297,7 @@ class OutputFormatTests(unittest.TestCase):
         scanner.assert_called_once_with(
             "demo.tar.gz", "source", mock.ANY,
             ["*.rs"], ["target/*"], 3, True, True)
-        self.assertEqual(save_sbom.call_args.args[6], ["spdx"])
+        self.assertEqual(save_sbom.call_args.args[6], ["spdx23"])
 
     def test_validate_output_request_rejects_gbt_without_ecosystem(self):
         args = mock.Mock(repo=None, package="demo.rpm", ecosystem=None)
