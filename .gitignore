@@ -2,3 +2,5 @@ __pycache__/
 *.pyc
 data/
 output/
+.venv/
+.cache/
