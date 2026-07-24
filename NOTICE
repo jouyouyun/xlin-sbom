@@ -1,0 +1,19 @@
+xlin-sbom
+Copyright Linx Software, Inc.
+
+This product includes software developed for SPDX document handling that is
+derived from (or adapted from) the SPDX tools-python project:
+
+  https://github.com/spdx/tools-python
+
+Portions of the code under actions/spdx/, actions/spdx3/, and
+actions/common/spdx_licensing.py originate from tools-python (PyPI package
+spdx-tools) and are used under the Apache License, Version 2.0.
+
+Copyright for those portions: SPDX contributors and the tools-python authors.
+See the SPDX-FileCopyrightText headers in the corresponding source files and
+the Apache-2.0 license text in LICENSE (and upstream LICENSE) for details.
+
+SPDX is a trademark of The Linux Foundation. xlin-sbom is not endorsed by or
+affiliated with SPDX or The Linux Foundation beyond use of the SPDX
+specifications and acknowledgment of the upstream tools-python work.
