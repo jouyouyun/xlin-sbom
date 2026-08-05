@@ -45,9 +45,11 @@ from actions.scanner.repo_helper import (
     find_deb_sources_in_repo
 )
 from actions.scanner.spdx_sbom_helper import (
+    convert_to_spdx3_payload,
     convert_to_spdx_document,
     write_spdx22,
     write_spdx23,
+    write_spdx3_payload,
 )
 from actions.scanner.gbt_sbom_helper import (
     CERTIFICATE_FILE_NAME,
@@ -82,7 +84,7 @@ def parse_arguments():
                                           help="Docker Hub 镜像名或离线 Docker 镜像 tar 文件路径。")
     parser.add_argument("--output", "-o", required=True, help="SBOM清单输出目录。")
     parser.add_argument("--format", "-f", action='append', required=True,
-                        choices=("linx", "spdx", "spdx22", "spdx23", "gbt"),
+                        choices=("linx", "spdx", "spdx22", "spdx23", "spdx3", "gbt"),
                         help="SBOM output format. Can be repeated. "
                              "'spdx' and 'spdx23' are aliases for SPDX 2.3.")
     parser.add_argument("--ecosystem",
@@ -300,6 +302,16 @@ def save_sbom(
         except (ValueError, KeyError, TypeError) as exc:
             logging.error(f"SPDX 2.2 写出失败（不影响其他格式）: {exc}")
 
+    if "spdx3" in output_formats:
+        try:
+            payload = convert_to_spdx3_payload(
+                linx_sbom, filename, spdx_timestamp, package_type)
+            spdx3_base = os.path.join(
+                sbom_path, f"spdx3-sbom_{filename}_{utc_timestamp}")
+            spdx3_path = write_spdx3_payload(payload, spdx3_base)
+            logging.info(f"{os.path.basename(spdx3_path)} 已被保存至 {output_dir}")
+        except Exception as exc:
+            logging.error(f"SPDX 3.0 写出失败（不影响其他格式）: {exc}")
 
     if "gbt" in output_formats:
         gbt_sbom_dirname = f"gbt-sbom_{filename}_{utc_timestamp}"

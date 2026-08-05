@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Linx SBOM → SPDX 2.2/2.3 Document 转换与写出。"""
+"""Linx SBOM → SPDX 2.2/2.3 Document / SPDX 3.0 Payload 转换与写出。"""
 
 from __future__ import annotations
 
@@ -45,6 +45,9 @@ from actions.spdx.model import (
 )
 from actions.spdx.validation.document_validator import validate_full_spdx_document
 from actions.spdx.writer.json.json_writer import write_document_to_file
+from actions.spdx3.bump_from_spdx2.spdx_document import bump_spdx_document
+from actions.spdx3.payload import Payload
+from actions.spdx3.writer.json_ld.json_ld_writer import write_payload
 
 _ALGORITHM_MAP = {
     "SHA1": ChecksumAlgorithm.SHA1,
@@ -167,6 +170,24 @@ def write_spdx22(document: Document, path: str) -> None:
     write_document_to_file(document, path, validate=False)
 
 
+def convert_to_spdx3_payload(
+    linx_sbom: Dict[str, Any],
+    filename: str,
+    created_time: str,
+    package_type: str,
+) -> Payload:
+    """Linx → SPDX 2.3 Document（校验通过）→ SPDX 3.0 Payload。"""
+    document = convert_to_spdx_document(
+        linx_sbom, filename, created_time, package_type, spdx_version="SPDX-2.3"
+    )
+    _validate_or_raise(document, "SPDX-2.3")
+    return bump_spdx_document(document)
+
+
+def write_spdx3_payload(payload: Payload, path_without_ext: str) -> str:
+    """写出 JSON-LD（write_payload 会追加 .jsonld）。返回最终路径。"""
+    write_payload(payload, path_without_ext)
+    return f"{path_without_ext}.jsonld"
 
 
 def _validate_or_raise(document: Document, spdx_version: str) -> None:
