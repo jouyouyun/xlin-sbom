@@ -54,8 +54,8 @@ from actions.scanner.spdx_sbom_helper import (
 from actions.scanner.gbt_sbom_helper import (
     CERTIFICATE_FILE_NAME,
     SIGNATURE_FILE_NAME,
-    convert_to_gbt,
-    sign_gbt_sbom
+    convert_to_sbomdf,
+    sign_sbomdf
 )
 
 def parse_arguments():
@@ -201,7 +201,7 @@ def validate_output_request(args, output_formats):
         None
     """
 
-    if "gbt" not in output_formats:
+    if "sbomdf" not in output_formats:
         return
     if args.repo is not None:
         logging.error("软件源扫描缺少软件信息，不支持生成 SBOMDF 格式 SBOM。")
@@ -313,13 +313,13 @@ def save_sbom(
         except Exception as exc:
             logging.error(f"SPDX 3.0 写出失败（不影响其他格式）: {exc}")
 
-    if "gbt" in output_formats:
-        gbt_sbom_dirname = f"gbt-sbom_{filename}_{utc_timestamp}"
-        gbt_sbom_filename = f"gbt-sbom_{filename}_{utc_timestamp}.SBOMDF.json"
-        gbt_sbom_path = os.path.join(sbom_path, gbt_sbom_dirname)
-        os.makedirs(gbt_sbom_path, exist_ok=True)
+    if "sbomdf" in output_formats:
+        sbomdf_sbom_dirname = f"sbomdf-sbom_{filename}_{utc_timestamp}"
+        sbomdf_sbom_filename = f"sbomdf-sbom_{filename}_{utc_timestamp}.SBOMDF.json"
+        sbomdf_sbom_path = os.path.join(sbom_path, sbomdf_sbom_dirname)
+        os.makedirs(sbomdf_sbom_path, exist_ok=True)
 
-        gbt_sbom = convert_to_gbt(
+        sbomdf_sbom = convert_to_sbomdf(
             linx_sbom, filename, spdx_timestamp, package_type,
             scan_mode or "package", ecosystem, config or {}, source_path)
         gbt_json_path = os.path.join(gbt_sbom_path, gbt_sbom_filename)
@@ -345,6 +345,20 @@ def resolve_output_formats(formats):
     for fmt in formats:
         normalized.append("spdx23" if fmt == "spdx" else fmt)
     return list(dict.fromkeys(normalized))
+
+
+def main():
+    """
+    主函数，负责解析命令行参数、设置日志记录系统、处理ISO镜像或软件包，并生成SBOM。
+
+    Args:
+        无直接参数。命令行参数通过 `parse_arguments()` 函数解析后传递给本函数。
+
+    Returns:
+        None: 函数不返回任何内容。
+    """
+
+    return list(dict.fromkeys(formats))
 
 
 def main():
