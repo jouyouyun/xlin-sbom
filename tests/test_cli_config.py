@@ -30,8 +30,8 @@ class OutputFormatTests(unittest.TestCase):
 
     def test_resolve_output_formats_deduplicates_user_choices(self):
         self.assertEqual(
-            self.cli.resolve_output_formats(["spdx", "gbt", "linx", "spdx"]),
-            ["spdx", "gbt", "linx"])
+            self.cli.resolve_output_formats(["spdx", "sbomdf", "linx", "spdx"]),
+            ["spdx", "sbomdf", "linx"])
 
 
     def test_resolve_output_formats_deduplicates_user_choices(self):
@@ -94,17 +94,17 @@ class OutputFormatTests(unittest.TestCase):
             "package_relationships_sbom": {"package_relationships": []},
         }
         with tempfile.TemporaryDirectory() as tmpdir, \
-                mock.patch.object(self.cli, "convert_to_gbt",
+                mock.patch.object(self.cli, "convert_to_sbomdf",
                                   return_value={"integrity": {}}), \
-                mock.patch.object(self.cli, "sign_gbt_sbom") as sign:
+                mock.patch.object(self.cli, "sign_sbomdf") as sign:
             self.cli.save_sbom(
                 linx_sbom, "rpm", "demo", "20260616000000",
-                "2026-06-16T00:00:00Z", tmpdir, ["gbt"],
+                "2026-06-16T00:00:00Z", tmpdir, ["sbomdf"],
                 "PyPI", {}, "package", None)
 
-            output_dir = Path(tmpdir) / "demo" / "gbt-sbom_demo_20260616000000"
+            output_dir = Path(tmpdir) / "demo" / "sbomdf-sbom_demo_20260616000000"
             self.assertTrue(
-                (output_dir / "gbt-sbom_demo_20260616000000.SBOMDF.json").exists())
+                (output_dir / "sbomdf-sbom_demo_20260616000000.SBOMDF.json").exists())
             sign.assert_called_once()
 
     def test_parse_arguments_has_no_deprecated_sbom_option(self):
@@ -116,10 +116,10 @@ class OutputFormatTests(unittest.TestCase):
     def test_parse_arguments_keeps_format_as_runtime_cli_option(self):
         with mock.patch("sys.argv", [
                 "linx-xiling.py", "-d", "debian:bookworm-slim",
-                "-o", "out", "--format", "gbt", "--ecosystem", "Debian:12"]):
+                "-o", "out", "--format", "sbomdf", "--ecosystem", "Debian:12"]):
             args = self.cli.parse_arguments()
         self.assertEqual(args.docker, "debian:bookworm-slim")
-        self.assertEqual(args.format, ["gbt"])
+        self.assertEqual(args.format, ["sbomdf"])
         self.assertEqual(args.ecosystem, "Debian:12")
         for removed_arg in (
                 "config", "disable_tqdm", "max_workers", "platform",
@@ -303,12 +303,12 @@ class OutputFormatTests(unittest.TestCase):
         args = mock.Mock(repo=None, package="demo.rpm", ecosystem=None)
 
         with self.assertRaises(SystemExit):
-            self.cli.validate_output_request(args, ["gbt"])
+            self.cli.validate_output_request(args, ["sbomdf"])
 
     def test_validate_output_request_allows_source_archive_gbt_without_ecosystem(self):
         args = mock.Mock(repo=None, package="demo.tar.gz", ecosystem=None)
 
-        self.cli.validate_output_request(args, ["gbt"])
+        self.cli.validate_output_request(args, ["sbomdf"])
 
     def test_validate_output_request_rejects_non_archive_gbt_without_ecosystem(self):
         requests = (
@@ -323,7 +323,7 @@ class OutputFormatTests(unittest.TestCase):
             with self.subTest(request=request):
                 args = mock.Mock(repo=None, ecosystem=None, **request)
                 with self.assertRaises(SystemExit):
-                    self.cli.validate_output_request(args, ["gbt"])
+                    self.cli.validate_output_request(args, ["sbomdf"])
 
     def test_validate_output_request_rejects_repo_gbt(self):
         args = mock.Mock(
@@ -332,7 +332,7 @@ class OutputFormatTests(unittest.TestCase):
             ecosystem="PyPI")
 
         with self.assertRaises(SystemExit):
-            self.cli.validate_output_request(args, ["gbt"])
+            self.cli.validate_output_request(args, ["sbomdf"])
 
     def test_main_passes_config_platform_to_docker_scanner(self):
         config = {

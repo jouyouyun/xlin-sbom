@@ -16,6 +16,27 @@
 
 import os
 import sys
+from pathlib import Path
+
+
+def _reexec_with_project_venv_if_needed():
+    """若存在项目 .venv 且当前解释器不是它，则切换到 .venv 再执行。
+
+    避免使用系统 python3 时因未安装 tqdm/beartype 等依赖而在 import 阶段失败。
+    """
+    venv_python = Path(__file__).resolve().parent / ".venv" / "bin" / "python"
+    if not venv_python.is_file():
+        return
+    try:
+        if Path(sys.executable).resolve() == venv_python.resolve():
+            return
+    except OSError:
+        return
+    os.execv(str(venv_python), [str(venv_python), str(Path(__file__).resolve()), *sys.argv[1:]])
+
+
+_reexec_with_project_venv_if_needed()
+
 import time
 import logging
 import argparse
@@ -54,8 +75,8 @@ from actions.scanner.spdx_sbom_helper import (
 from actions.scanner.gbt_sbom_helper import (
     CERTIFICATE_FILE_NAME,
     SIGNATURE_FILE_NAME,
-    convert_to_gbt,
-    sign_gbt_sbom
+    convert_to_sbomdf,
+    sign_sbomdf
 )
 
 def parse_arguments():
@@ -201,7 +222,7 @@ def validate_output_request(args, output_formats):
         None
     """
 
-    if "gbt" not in output_formats:
+    if "sbomdf" not in output_formats:
         return
     if args.repo is not None:
         logging.error("软件源扫描缺少软件信息，不支持生成 SBOMDF 格式 SBOM。")
@@ -354,6 +375,20 @@ def resolve_output_formats(formats):
     for fmt in formats:
         normalized.append("spdx23" if fmt == "spdx" else fmt)
     return list(dict.fromkeys(normalized))
+
+
+def main():
+    """
+    主函数，负责解析命令行参数、设置日志记录系统、处理ISO镜像或软件包，并生成SBOM。
+
+    Args:
+        无直接参数。命令行参数通过 `parse_arguments()` 函数解析后传递给本函数。
+
+    Returns:
+        None: 函数不返回任何内容。
+    """
+
+    return list(dict.fromkeys(formats))
 
 
 def main():
