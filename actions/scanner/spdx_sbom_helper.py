@@ -43,6 +43,7 @@ from actions.spdx.model import (
     SpdxNoAssertion,
     SpdxNone,
 )
+from actions.spdx.spdx_element_utils import calculate_package_verification_code
 from actions.spdx.validation.document_validator import validate_full_spdx_document
 from actions.spdx.writer.json.json_writer import write_document_to_file
 from actions.spdx3.bump_from_spdx2.spdx_document import bump_spdx_document
@@ -138,9 +139,11 @@ def convert_to_spdx_document(
         | {file_elem.spdx_id for file_elem in files}
     )
     relationships = _build_relationships(linx_sbom, spdx_version)
+    relationships = _drop_relationships_with_unknown_ids(relationships, known_ids)
     relationships = _ensure_describes(
         relationships, packages, files, creation_info.spdx_id
     )
+    packages = _mark_packages_with_analyzed_files(packages, files, relationships)
 
     extracted = [
         _build_extracted_licensing_info(license_info)
@@ -428,6 +431,15 @@ def _build_relationships(
     return relationships
 
 
+def _mark_packages_with_analyzed_files(
+    packages: List[Package],
+    files: List[File],
+    relationships: List[Relationship],
+) -> List[Package]:
+    """若 Package CONTAINS File，则 files_analyzed 必须为 True 并提供 verification_code。"""
+    if not packages or not files:
+        return packages
+
     files_by_id = {file_elem.spdx_id: file_elem for file_elem in files}
     contained_files: Dict[str, List[File]] = {package.spdx_id: [] for package in packages}
 
@@ -459,6 +471,25 @@ def _build_relationships(
             package.license_info_from_files = [SpdxNoAssertion()]
     return packages
 
+
+def _drop_relationships_with_unknown_ids(
+    relationships: List[Relationship], known_ids: Set[str]
+) -> List[Relationship]:
+    kept: List[Relationship] = []
+    for relationship in relationships:
+        if (
+            relationship.spdx_element_id not in known_ids
+            or relationship.related_spdx_element_id not in known_ids
+        ):
+            logging.warning(
+                "跳过引用未纳入 SPDX 元素的关系: "
+                f"{relationship.spdx_element_id} "
+                f"{relationship.relationship_type.name} "
+                f"{relationship.related_spdx_element_id}"
+            )
+            continue
+        kept.append(relationship)
+    return kept
 
 
 def _ensure_describes(

@@ -271,9 +271,10 @@ def save_sbom(
         source_path (str | None): 原始扫描目标路径。
 
     Returns:
-        None: 函数不返回任何内容。
+        list[str]: 写出失败的格式标识；空列表表示全部成功。
     """
 
+    failed_formats = []
     output_formats = resolve_output_formats(output_formats)
 
     sbom_path = os.path.join(output_dir, filename)
@@ -310,6 +311,7 @@ def save_sbom(
             write_spdx23(document, os.path.join(sbom_path, spdx_sbom_filename))
             logging.info(f"{spdx_sbom_filename} 已被保存至 {output_dir}")
         except (ValueError, KeyError, TypeError) as exc:
+            failed_formats.append("spdx23")
             logging.error(f"SPDX 2.3 写出失败（不影响其他格式）: {exc}")
 
     if "spdx22" in output_formats:
@@ -321,6 +323,7 @@ def save_sbom(
             write_spdx22(document, os.path.join(sbom_path, spdx22_filename))
             logging.info(f"{spdx22_filename} 已被保存至 {output_dir}")
         except (ValueError, KeyError, TypeError) as exc:
+            failed_formats.append("spdx22")
             logging.error(f"SPDX 2.2 写出失败（不影响其他格式）: {exc}")
 
     if "spdx3" in output_formats:
@@ -332,24 +335,30 @@ def save_sbom(
             spdx3_path = write_spdx3_payload(payload, spdx3_base)
             logging.info(f"{os.path.basename(spdx3_path)} 已被保存至 {output_dir}")
         except Exception as exc:
+            failed_formats.append("spdx3")
             logging.error(f"SPDX 3.0 写出失败（不影响其他格式）: {exc}")
 
-    if "sbomdf" in output_formats:
-        sbomdf_sbom_dirname = f"sbomdf-sbom_{filename}_{utc_timestamp}"
-        sbomdf_sbom_filename = f"sbomdf-sbom_{filename}_{utc_timestamp}.SBOMDF.json"
-        sbomdf_sbom_path = os.path.join(sbom_path, sbomdf_sbom_dirname)
-        os.makedirs(sbomdf_sbom_path, exist_ok=True)
+    if "gbt" in output_formats:
+        try:
+            gbt_sbom_dirname = f"gbt-sbom_{filename}_{utc_timestamp}"
+            gbt_sbom_filename = f"gbt-sbom_{filename}_{utc_timestamp}.SBOMDF.json"
+            gbt_sbom_path = os.path.join(sbom_path, gbt_sbom_dirname)
+            os.makedirs(gbt_sbom_path, exist_ok=True)
 
-        sbomdf_sbom = convert_to_sbomdf(
-            linx_sbom, filename, spdx_timestamp, package_type,
-            scan_mode or "package", ecosystem, config or {}, source_path)
-        gbt_json_path = os.path.join(gbt_sbom_path, gbt_sbom_filename)
-        signature_path = os.path.join(gbt_sbom_path, SIGNATURE_FILE_NAME)
-        certificate_path = os.path.join(gbt_sbom_path, CERTIFICATE_FILE_NAME)
-        save_data_to_json(gbt_sbom, gbt_json_path)
-        sign_gbt_sbom(gbt_json_path, signature_path, certificate_path)
-        logging.info(f"{gbt_sbom_dirname} 已被保存至 {output_dir}")
+            gbt_sbom = convert_to_gbt(
+                linx_sbom, filename, spdx_timestamp, package_type,
+                scan_mode or "package", ecosystem, config or {}, source_path)
+            gbt_json_path = os.path.join(gbt_sbom_path, gbt_sbom_filename)
+            signature_path = os.path.join(gbt_sbom_path, SIGNATURE_FILE_NAME)
+            certificate_path = os.path.join(gbt_sbom_path, CERTIFICATE_FILE_NAME)
+            save_data_to_json(gbt_sbom, gbt_json_path)
+            sign_gbt_sbom(gbt_json_path, signature_path, certificate_path)
+            logging.info(f"{gbt_sbom_dirname} 已被保存至 {output_dir}")
+        except Exception as exc:
+            failed_formats.append("gbt")
+            logging.error(f"SBOMDF 写出失败（不影响其他格式）: {exc}")
 
+    return failed_formats
 
 
 def resolve_output_formats(formats):
@@ -494,9 +503,14 @@ def main():
             sys.exit(1)
 
     # 保存SBOM
-    save_sbom(linx_sbom, package_type, filename,
-              formatted_utc_time, spdx_utc_time, output_dir,
-              output_formats, args.ecosystem, config, scan_mode, source_path)
+    failed_formats = save_sbom(
+        linx_sbom, package_type, filename,
+        formatted_utc_time, spdx_utc_time, output_dir,
+        output_formats, args.ecosystem, config, scan_mode, source_path)
+    if failed_formats:
+        logging.error(
+            "以下请求的输出格式写出失败: " + ", ".join(failed_formats))
+        sys.exit(1)
     logging.info("Linx SBOM 生成完成")
 
 
