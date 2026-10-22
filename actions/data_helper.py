@@ -14,7 +14,19 @@
 
 import hashlib
 import json
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, Iterable, List, Union
+
+
+def calculate_file_checksums(
+    file: Any, algorithms: Iterable[str] = ("MD5", "SHA1")
+) -> Dict[str, str]:
+    """从真实内容一次性计算指定摘要（默认 MD5、SHA1），不要求流可 seek。"""
+
+    digests = {algorithm: hashlib.new(algorithm.lower()) for algorithm in algorithms}
+    for chunk in iter(lambda: file.read(65536), b""):
+        for digest in digests.values():
+            digest.update(chunk)
+    return {algorithm: digest.hexdigest() for algorithm, digest in digests.items()}
 
 
 def calculate_sha1(file: Any) -> str:
@@ -109,3 +121,35 @@ def remove_duplicates(list_of_dicts: List[Dict[str, Any]]) -> List[Dict[str, Any
             seen_ids.add(item_id)
             unique_list.append(item)
     return unique_list
+
+
+def remove_duplicate_files(files: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """合并同 ID 的文件时优先保留已读取内容的条目，避免 ghost 遮盖真实文件。"""
+
+    unique_files = {}
+    for file in files:
+        file_id = file.get("id")
+        previous = unique_files.get(file_id)
+        has_sha1 = any(c.get("algorithm") == "SHA1" and c.get("value")
+            for c in file.get("additional_checksums", []))
+        previous_has_sha1 = previous is not None and any(
+            c.get("algorithm") == "SHA1" and c.get("value")
+            for c in previous.get("additional_checksums", []))
+        if previous is None or (has_sha1 and not previous_has_sha1):
+            unique_files[file_id] = file
+    return list(unique_files.values())
+
+
+def remove_duplicate_relationships(
+    relationships: List[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
+    """关系由两端 ID 和类型共同标识，保留不同类型及不同归属的关系。"""
+
+    unique = []
+    seen = set()
+    for relationship in relationships:
+        key = (relationship["id"], relationship["related_element"], relationship["relationship_type"])
+        if key not in seen:
+            seen.add(key)
+            unique.append(relationship)
+    return unique

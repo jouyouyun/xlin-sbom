@@ -72,7 +72,7 @@ from actions.scanner.spdx_sbom_helper import (
     write_spdx23,
     write_spdx3_payload,
 )
-from actions.scanner.gbt_sbom_helper import (
+from actions.scanner.sbomdf_helper import (
     CERTIFICATE_FILE_NAME,
     SIGNATURE_FILE_NAME,
     convert_to_sbomdf,
@@ -105,7 +105,7 @@ def parse_arguments():
                                           help="Docker Hub 镜像名或离线 Docker 镜像 tar 文件路径。")
     parser.add_argument("--output", "-o", required=True, help="SBOM清单输出目录。")
     parser.add_argument("--format", "-f", action='append', required=True,
-                        choices=("linx", "spdx", "spdx22", "spdx23", "spdx3", "gbt"),
+                        choices=("linx", "spdx", "spdx22", "spdx23", "spdx3", "sbomdf"),
                         help="SBOM output format. Can be repeated. "
                              "'spdx' and 'spdx23' are aliases for SPDX 2.3.")
     parser.add_argument("--ecosystem",
@@ -338,24 +338,24 @@ def save_sbom(
             failed_formats.append("spdx3")
             logging.error(f"SPDX 3.0 写出失败（不影响其他格式）: {exc}")
 
-    if "gbt" in output_formats:
+    if "sbomdf" in output_formats:
         try:
-            gbt_sbom_dirname = f"gbt-sbom_{filename}_{utc_timestamp}"
-            gbt_sbom_filename = f"gbt-sbom_{filename}_{utc_timestamp}.SBOMDF.json"
-            gbt_sbom_path = os.path.join(sbom_path, gbt_sbom_dirname)
-            os.makedirs(gbt_sbom_path, exist_ok=True)
+            sbomdf_dirname = f"sbomdf-sbom_{filename}_{utc_timestamp}"
+            sbomdf_filename = f"sbomdf-sbom_{filename}_{utc_timestamp}.SBOMDF.json"
+            sbomdf_dir = os.path.join(sbom_path, sbomdf_dirname)
+            os.makedirs(sbomdf_dir, exist_ok=True)
 
-            gbt_sbom = convert_to_gbt(
+            sbomdf = convert_to_sbomdf(
                 linx_sbom, filename, spdx_timestamp, package_type,
                 scan_mode or "package", ecosystem, config or {}, source_path)
-            gbt_json_path = os.path.join(gbt_sbom_path, gbt_sbom_filename)
-            signature_path = os.path.join(gbt_sbom_path, SIGNATURE_FILE_NAME)
-            certificate_path = os.path.join(gbt_sbom_path, CERTIFICATE_FILE_NAME)
-            save_data_to_json(gbt_sbom, gbt_json_path)
-            sign_gbt_sbom(gbt_json_path, signature_path, certificate_path)
-            logging.info(f"{gbt_sbom_dirname} 已被保存至 {output_dir}")
+            sbomdf_json_path = os.path.join(sbomdf_dir, sbomdf_filename)
+            signature_path = os.path.join(sbomdf_dir, SIGNATURE_FILE_NAME)
+            certificate_path = os.path.join(sbomdf_dir, CERTIFICATE_FILE_NAME)
+            save_data_to_json(sbomdf, sbomdf_json_path)
+            sign_sbomdf(sbomdf_json_path, signature_path, certificate_path)
+            logging.info(f"{sbomdf_dirname} 已被保存至 {output_dir}")
         except Exception as exc:
-            failed_formats.append("gbt")
+            failed_formats.append("sbomdf")
             logging.error(f"SBOMDF 写出失败（不影响其他格式）: {exc}")
 
     return failed_formats
@@ -375,20 +375,6 @@ def resolve_output_formats(formats):
     for fmt in formats:
         normalized.append("spdx23" if fmt == "spdx" else fmt)
     return list(dict.fromkeys(normalized))
-
-
-def main():
-    """
-    主函数，负责解析命令行参数、设置日志记录系统、处理ISO镜像或软件包，并生成SBOM。
-
-    Args:
-        无直接参数。命令行参数通过 `parse_arguments()` 函数解析后传递给本函数。
-
-    Returns:
-        None: 函数不返回任何内容。
-    """
-
-    return list(dict.fromkeys(formats))
 
 
 def main():

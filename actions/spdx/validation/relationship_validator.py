@@ -2,37 +2,45 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-from beartype.typing import List
+from beartype.typing import List, Optional, Set
 
 from actions.spdx.model import Document, Relationship, RelationshipType, SpdxNoAssertion, SpdxNone
-from actions.spdx.validation.spdx_id_validators import validate_spdx_id
+from actions.spdx.validation.spdx_id_validators import get_list_of_all_spdx_ids, validate_spdx_id
 from actions.spdx.validation.validation_message import SpdxElementType, ValidationContext, ValidationMessage
 
 
 def validate_relationships(
-    relationships: List[Relationship], spdx_version: str, document: Document
+    relationships: List[Relationship], spdx_version: str, document: Document,
+    spdx_ids: Optional[Set[str]] = None,
 ) -> List[ValidationMessage]:
+    if spdx_ids is None:
+        spdx_ids = set(get_list_of_all_spdx_ids(document))
     validation_messages = []
     for relationship in relationships:
-        validation_messages.extend(validate_relationship(relationship, spdx_version, document))
+        validation_messages.extend(validate_relationship(relationship, spdx_version, document, spdx_ids))
 
     return validation_messages
 
 
 def validate_relationship(
-    relationship: Relationship, spdx_version: str, document: Document
+    relationship: Relationship, spdx_version: str, document: Document,
+    spdx_ids: Optional[Set[str]] = None,
 ) -> List[ValidationMessage]:
+    if spdx_ids is None:
+        spdx_ids = set(get_list_of_all_spdx_ids(document))
     validation_messages = []
     context = ValidationContext(element_type=SpdxElementType.RELATIONSHIP, full_element=relationship)
 
     relationship_type: RelationshipType = relationship.relationship_type
 
-    messages: List[str] = validate_spdx_id(relationship.spdx_element_id, document, check_document=True)
+    messages: List[str] = validate_spdx_id(
+        relationship.spdx_element_id, document, check_document=True, spdx_ids=spdx_ids)
     for message in messages:
         validation_messages.append(ValidationMessage(message, context))
 
     if relationship.related_spdx_element_id not in [SpdxNone(), SpdxNoAssertion()]:
-        messages: List[str] = validate_spdx_id(relationship.related_spdx_element_id, document, check_document=True)
+        messages: List[str] = validate_spdx_id(
+            relationship.related_spdx_element_id, document, check_document=True, spdx_ids=spdx_ids)
         for message in messages:
             validation_messages.append(ValidationMessage(message, context))
 

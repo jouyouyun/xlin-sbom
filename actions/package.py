@@ -12,6 +12,14 @@
 # MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 # See the Mulan PSL v2 for more details.
 
+import hashlib
+import json
+import logging
+from typing import Iterable, List, Tuple
+
+from actions.data_helper import remove_duplicate_files, remove_duplicate_relationships
+
+
 class Package:
     """描述扫描得到的软件包及其 SBOM 关联数据。"""
 
@@ -29,7 +37,6 @@ class Package:
             checksum_value (str): 校验和值。
         """
 
-        self.id = f"Package-{name}-{checksum_value[:12]}"
         self.name = name
         self.version = version
         self.release = release
@@ -37,6 +44,8 @@ class Package:
         self.package_type = package_type
         self.checksum_algorithm = checksum_algorithm
         self.checksum_value = checksum_value
+        identity = json.dumps(self.identity_key(), ensure_ascii=False, separators=(",", ":"))
+        self.id = f"Package-{name}-{hashlib.sha256(identity.encode('utf-8')).hexdigest()[:32]}"
         self.licenses = []
         self.category = "NOASSERTION"
         self.vulnerabilities = []
@@ -46,6 +55,16 @@ class Package:
         self.source = "NOASSERTION"
         self.suppliers = []
         self.description = "NOASSERTION"
+
+    def identity_key(self) -> Tuple[str, ...]:
+        """版本、架构和完整摘要共同确定包身份，不能仅用名称或摘要前缀。"""
+
+        full_version = f"{self.version}-{self.release}" if self.release else self.version
+        return (
+            self.package_type or "", self.name or "", full_version or "", self.arch or "",
+            (self.checksum_algorithm or "").upper().replace("-", ""),
+            (self.checksum_value or "").lower(),
+        )
 
     def set_category(self, category: str) -> None:
         """设置软件包分类。
@@ -163,7 +182,7 @@ class Package:
                 "related_element": file['id'],
                 "relationship_type": "CONTAINS"
             })
-        return relationships
+        return remove_duplicate_relationships(relationships)
 
     def get_json(self) -> dict:
         """转换为 Linx package JSON 对象。
@@ -191,3 +210,76 @@ class Package:
                 "algorithm": self.checksum_algorithm
             }
         }
+
+
+def merge_packages(packages: Iterable[Package]) -> List[Package]:
+    """共享的重复包合并：保留不同版本/架构/内容，合并副本关联的数据。"""
+
+    unique = {}
+    id_to_identity = {}
+    duplicate_count = 0
+    for package in packages:
+        key = package.identity_key()
+        if package.id in id_to_identity and id_to_identity[package.id] != key:
+            raise ValueError(f"软件包编号冲突，包身份不同: {package.id}")
+        id_to_identity[package.id] = key
+        previous = unique.get(key)
+        if previous is None:
+            package.files = remove_duplicate_files(package.files)
+            unique[key] = package
+            continue
+        if previous.id != package.id:
+            raise ValueError(f"相同软件包身份出现不同编号: {previous.id}, {package.id}")
+        duplicate_count += 1
+        previous.files = remove_duplicate_files(previous.files + package.files)
+        for attribute in ("licenses", "declared_dependencies", "suppliers", "vulnerabilities"):
+            target = getattr(previous, attribute)
+            for value in getattr(package, attribute):
+                if value not in target:
+                    target.append(value)
+        known_dependencies = {dependency.id for dependency in previous.concluded_dependencies}
+        for dependency in package.concluded_dependencies:
+            if dependency.id not in known_dependencies:
+                previous.concluded_dependencies.append(dependency)
+                known_dependencies.add(dependency.id)
+        for attribute in ("description", "source", "category"):
+            if getattr(previous, attribute) in (None, "", "NOASSERTION"):
+                setattr(previous, attribute, getattr(package, attribute))
+    if duplicate_count:
+        logging.info("已合并 %d 个重复软件包副本，保留 %d 个独立软件包", duplicate_count, len(unique))
+    result = list(unique.values())
+    _disambiguate_file_contents(result)
+    return result
+
+
+def _file_content_key(file: dict) -> Tuple[str, str]:
+    # 归档库可能返回不可哈希的 str 子类；内容键只能使用普通字符串。
+    path = str(file.get("path") or file.get("name") or "")
+    checksums = (file.get("additional_checksums") or []) + [file.get("checksums", {})]
+    for checksum in checksums:
+        if checksum and checksum.get("algorithm", "").upper().replace("-", "") == "SHA1":
+            value = checksum.get("value") or ""
+            if len(value) == 40 and all(character in "0123456789abcdefABCDEF" for character in value):
+                return path, value.lower()
+    return path, ""
+
+
+def _disambiguate_file_contents(packages: List[Package]) -> None:
+    """同一文件编号对应不同真实内容时，分别保留并重建对应的包含关系。"""
+
+    variants = {}
+    for package in packages:
+        for file in package.files:
+            path, digest = _file_content_key(file)
+            if digest:
+                variants.setdefault(file["id"], set()).add((path, digest))
+    for package in packages:
+        files = []
+        for file in package.files:
+            key = _file_content_key(file)
+            if key[1] and len(variants.get(file["id"], ())) > 1:
+                identity = json.dumps(key, ensure_ascii=False, separators=(",", ":"))
+                suffix = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:32]
+                file = {**file, "id": f"{file['id']}-{suffix}"}
+            files.append(file)
+        package.files = files

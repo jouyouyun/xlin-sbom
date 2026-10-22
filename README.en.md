@@ -32,6 +32,19 @@ docker compose run --rm linx-xiling [options]
 
 ```
 
+## Build and Verify Current Source
+
+Rebuild the image after changing source code. The `.:/app/data` mount supplies scan data; `/app/linx-xiling.py` runs the code packaged in the image. Compose builds and runs the separate tag `linx-xiling:sbomdf-fix` by default, preserving an existing `linx-xiling:1.1.0` image:
+
+```bash
+docker compose build
+docker compose run --rm linx-xiling --help
+```
+
+Compose already configures the Debian download mirrors used during validation. No environment variable or extra `--build-arg` options are needed. Use `docker image ls linx-xiling` to view images managed by Docker; images are not files in the project directory.
+
+The source checkout can be built without `actions/scanner/osv-scanner/osv-scanner_linux_amd64`. In that case, source archive OSV dependency detection logs a warning and returns empty results. Supply a verified Linux amd64 OSV Scanner binary before building if that capability is required. The image installs OpenSSL for SBOMDF signing.
+
 ---
 
 ## Scan Modes in Detail
@@ -97,6 +110,8 @@ docker compose run --rm linx-xiling -d /app/data/linx-xiling_1.0.0.tar -o output
 ```
 
 Docker image scanning depends on installed package databases in the final filesystem. Images without dpkg or RPM databases, such as scratch or some distroless images, cannot produce system package SBOMs in this version.
+
+RPM database detection supports SQLite (`rpmdb.sqlite`), BDB (`Packages`), and NDB v0 (`Packages.db`) under `/var/lib/rpm` or `/usr/lib/sysimage/rpm`. NDB records are validated and imported into a separate SQLite database in the scan temporary directory before querying; the input image is unchanged.
 
 ### 4. Repository Scan (`--repo` / `-r`)
 

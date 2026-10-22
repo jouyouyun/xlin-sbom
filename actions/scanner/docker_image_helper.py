@@ -21,6 +21,7 @@ import logging
 import os
 import re
 import shutil
+import stat
 import subprocess
 import tarfile
 import tempfile
@@ -28,12 +29,14 @@ import tempfile
 import requests
 
 from actions import ASSIST_DIR
-from actions.data_helper import read_data_from_json, remove_duplicates
+from actions.data_helper import calculate_file_checksums, read_data_from_json, remove_duplicate_files, remove_duplicates
 from actions.licenses_helper import _extract_deb_license_list, rpm_licenses_scanner
-from actions.package import Package
+from actions.package import Package, merge_packages
 from actions.sbom_helper import build_sbom_header
 from actions.scanner.originators_helper import extract_originator_name
+from actions.scanner.package_files_helper import rpm_digest_algorithm
 from actions.scanner.relationships_helper import get_deb_relationships, get_rpm_relationships
+from actions.scanner.rpm_ndb_helper import convert_ndb_database
 from actions.scanner.suppliers_helper import DEB_SUPPLIERS, RPM_SUPPLIERS, get_suppliers
 
 
@@ -520,6 +523,7 @@ def _apply_layer_stream(layer_file: BinaryIO, rootfs_dir: str) -> None:
 def _apply_layer_members(layer_tar: tarfile.TarFile, rootfs_dir: str) -> None:
     """按 overlay 语义将 layer 成员应用到最终文件系统目录。"""
 
+    pending_hardlinks = {}
     for member in layer_tar:
         normalized = _normalize_member_path(member.name)
         if not normalized:
@@ -528,12 +532,18 @@ def _apply_layer_members(layer_tar: tarfile.TarFile, rootfs_dir: str) -> None:
         dirname = os.path.dirname(normalized)
         if basename == ".wh..wh..opq":
             _clear_directory(os.path.join(rootfs_dir, dirname))
+            pending_hardlinks = {name: target for name, target in pending_hardlinks.items()
+                if dirname and not name.startswith(dirname + "/")}
             continue
         if basename.startswith(".wh."):
             target_name = basename[len(".wh."):]
-            _remove_path(os.path.join(rootfs_dir, dirname, target_name))
+            deleted = os.path.join(dirname, target_name)
+            _remove_path(os.path.join(rootfs_dir, deleted))
+            pending_hardlinks = {name: target for name, target in pending_hardlinks.items()
+                if name != deleted and not name.startswith(deleted + "/")}
             continue
 
+        pending_hardlinks.pop(normalized, None)
         target_path = os.path.join(rootfs_dir, normalized)
         if member.isdir():
             os.makedirs(target_path, exist_ok=True)
@@ -545,13 +555,47 @@ def _apply_layer_members(layer_tar: tarfile.TarFile, rootfs_dir: str) -> None:
                 continue
             with source, open(target_path, "wb") as target:
                 shutil.copyfileobj(source, target)
-        elif member.issym() or member.islnk():
+        elif member.issym():
             os.makedirs(os.path.dirname(target_path), exist_ok=True)
             _remove_path(target_path)
             try:
                 os.symlink(member.linkname, target_path)
             except OSError:
                 continue
+        elif member.islnk():
+            if not _create_layer_hardlink(rootfs_dir, normalized, member.linkname):
+                pending_hardlinks[normalized] = member.linkname
+
+    # tar 硬链接的目标相对于归档根目录，可引用稍后出现的成员。
+    while pending_hardlinks:
+        remaining = {name: target for name, target in pending_hardlinks.items()
+            if not _create_layer_hardlink(rootfs_dir, name, target)}
+        if len(remaining) == len(pending_hardlinks):
+            for name, target in remaining.items():
+                logging.warning("镜像硬链接的目标不可读取，跳过: %s -> %s", name, target)
+            break
+        pending_hardlinks = remaining
+
+
+def _create_layer_hardlink(rootfs_dir: str, name: str, target: str) -> bool:
+    """恢复真实硬链接，并将源路径和目标路径限制在临时 rootfs 内。"""
+
+    source_path = _rootfs_regular_file(rootfs_dir, target)
+    if source_path is None:
+        return False
+    destination = os.path.join(rootfs_dir, name)
+    parent = os.path.realpath(os.path.dirname(destination))
+    if os.path.commonpath([os.path.realpath(rootfs_dir), parent]) != os.path.realpath(rootfs_dir):
+        return False
+    if os.path.abspath(source_path) == os.path.abspath(destination):
+        return True
+    try:
+        os.makedirs(parent, exist_ok=True)
+        _remove_path(destination)
+        os.link(source_path, destination)
+        return True
+    except OSError:
+        return False
 
 
 def _normalize_member_path(path: str) -> Optional[str]:
@@ -590,13 +634,17 @@ def _has_dpkg_database(rootfs_dir: str) -> bool:
 def _has_rpm_database(rootfs_dir: str) -> bool:
     """判断 rootfs 是否包含 RPM 数据库。"""
 
-    candidates = (
-        "var/lib/rpm/Packages",
-        "var/lib/rpm/rpmdb.sqlite",
-        "usr/lib/sysimage/rpm/Packages",
-        "usr/lib/sysimage/rpm/rpmdb.sqlite",
-    )
-    return any(os.path.exists(os.path.join(rootfs_dir, candidate)) for candidate in candidates)
+    return _find_rpm_database(rootfs_dir) is not None
+
+
+def _find_rpm_database(rootfs_dir: str) -> Optional[Tuple[str, str]]:
+    """查找实际存在的数据库，兼容 SQLite、BDB 和 NDB。"""
+
+    for directory in ("usr/lib/sysimage/rpm", "var/lib/rpm"):
+        for filename in ("rpmdb.sqlite", "Packages", "Packages.db"):
+            if os.path.isfile(os.path.join(rootfs_dir, directory, filename)):
+                return directory, filename
+    return None
 
 
 def _scan_dpkg_rootfs(
@@ -643,7 +691,7 @@ def _scan_dpkg_rootfs(
         package_key = _select_dpkg_info_key(
             name, architecture, package_file_paths, package_md5sums)
         package_files = _build_dpkg_files(
-            package_key, package_file_paths, package_md5sums)
+            rootfs_dir, package_key, package_file_paths, package_md5sums)
         for file_info in package_files:
             package.add_file(file_info)
         package_licenses = _read_dpkg_package_licenses(rootfs_dir, name)
@@ -651,18 +699,19 @@ def _scan_dpkg_rootfs(
             package.add_license(license_info.get("id"))
 
         packages.append(package)
-        files.extend(package.files)
-        file_relationships.extend(package.get_file_relationships())
         licenses.extend(package_licenses)
 
     if not packages:
         raise ValueError("Docker 镜像内的 dpkg 数据库未包含已安装软件包。")
 
+    packages = merge_packages(packages)
+    files = [file for package in packages for file in package.files]
+    file_relationships = [relationship for package in packages for relationship in package.get_file_relationships()]
     packages_sbom = [package.get_json() for package in packages]
     packages_sbom.sort(key=lambda item: item.get("name", ""))
     package_relationships = get_deb_relationships(packages_sbom, disable_tqdm)
     return _build_docker_sbom(
-        packages_sbom, remove_duplicates(files), file_relationships,
+        packages_sbom, remove_duplicate_files(files), file_relationships,
         remove_duplicates(licenses), package_relationships, image_info,
         created_time)
 
@@ -720,19 +769,20 @@ def _scan_rpm_rootfs(
             package.add_license(license_info.get("id"))
 
         packages.append(package)
-        files.extend(package.files)
-        file_relationships.extend(package.get_file_relationships())
         licenses.extend(package_licenses)
 
     if not packages:
         raise ValueError("Docker 镜像内的 RPM 数据库未包含已安装软件包。")
 
+    packages = merge_packages(packages)
+    files = [file for package in packages for file in package.files]
+    file_relationships = [relationship for package in packages for relationship in package.get_file_relationships()]
     packages_sbom = [package.get_json() for package in packages]
     packages_sbom.sort(key=lambda item: item.get("name", ""))
     package_relationships = get_rpm_relationships(
         packages_sbom, provides_relationships, disable_tqdm)
     return _build_docker_sbom(
-        packages_sbom, remove_duplicates(files), file_relationships,
+        packages_sbom, remove_duplicate_files(files), file_relationships,
         remove_duplicates(licenses), package_relationships, image_info,
         created_time)
 
@@ -818,6 +868,7 @@ def _select_dpkg_info_key(
 
 
 def _build_dpkg_files(
+    rootfs_dir: str,
     package_key: str,
     file_paths: Dict[str, List[str]],
     md5sums: Dict[str, Dict[str, str]],
@@ -825,15 +876,18 @@ def _build_dpkg_files(
     """根据 dpkg 文件列表和 md5sums 构建 Linx 文件清单。"""
 
     checksums = md5sums.get(package_key, {})
-    paths = sorted(checksums) if checksums else file_paths.get(package_key, [])
+    paths = sorted(set(checksums) | set(file_paths.get(package_key, [])))
     files = []
     for path in paths:
         normalized_path = f"/{path.lstrip('/')}"
         basename = os.path.basename(normalized_path)
         if not basename:
             continue
+        if normalized_path not in checksums and _rootfs_regular_file(
+                rootfs_dir, normalized_path, follow_final_link=False) is None:
+            continue
         files.append(_build_file_info(
-            normalized_path, "MD5", checksums.get(normalized_path, "NOASSERTION")))
+            rootfs_dir, normalized_path, "MD5", checksums.get(normalized_path, "NOASSERTION")))
     return files
 
 
@@ -859,11 +913,18 @@ def _split_dpkg_dependencies(dependencies: str) -> List[str]:
 
 
 def _detect_rpm_db_args(rootfs_dir: str) -> List[str]:
-    """根据 rootfs 中的 RPM 数据库位置生成 rpm 命令参数。"""
+    """根据实际数据库位置生成参数，NDB 在临时 rootfs 中转换后查询。"""
 
-    if os.path.exists(os.path.join(rootfs_dir, "usr/lib/sysimage/rpm")):
-        return ["--dbpath", "/usr/lib/sysimage/rpm"]
-    return []
+    database = _find_rpm_database(rootfs_dir)
+    if database is None:
+        raise ValueError("Docker 镜像内未发现 RPM 包数据库。")
+    directory, filename = database
+    if filename == "Packages.db":
+        logging.info("侦测到 RPM NDB 数据库，将在临时目录转换为 SQLite 后查询")
+        query_dir = tempfile.mkdtemp(prefix=".linx_rpmdb_", dir=rootfs_dir)
+        convert_ndb_database(os.path.join(rootfs_dir, directory, filename), query_dir)
+        return ["--dbpath", "/" + os.path.basename(query_dir), "--define", "_db_backend sqlite"]
+    return ["--dbpath", "/" + directory]
 
 
 def _run_rpm_query(rootfs_dir: str, db_args: List[str], args: List[str]) -> str:
@@ -886,26 +947,74 @@ def _build_rpm_files(
     db_args: List[str],
     package_name: str,
 ) -> List[Dict[str, Any]]:
-    """通过 rpm --dump 构建 RPM 包文件清单。"""
+    """读取 RPM 摘要算法和普通文件清单，再从最终 rootfs 计算真实摘要。"""
 
     files = []
     dump_output = _run_rpm_query(
-        rootfs_dir, db_args, ["-q", "--dump", package_name])
+        rootfs_dir, db_args, ["-q", "--qf",
+            "%{FILEDIGESTALGO}\n[%{FILENAMES}\t%{FILEDIGESTS}\t%{FILEMODES:octal}\n]",
+            package_name])
+    algorithm = "MD5"
     for line in dump_output.splitlines():
-        fields = line.split()
-        if len(fields) < 4:
+        fields = line.split("\t")
+        if len(fields) == 1:
+            algorithm = rpm_digest_algorithm(fields[0])
             continue
-        checksum = fields[3] if fields[3] != "(none)" else "NOASSERTION"
-        files.append(_build_file_info(fields[0], "MD5", checksum))
+        if len(fields) != 3:
+            continue
+        if not stat.S_ISREG(int(fields[2], 8)):
+            continue
+        checksum = fields[1] if fields[1] not in ("", "(none)") else "NOASSERTION"
+        files.append(_build_file_info(rootfs_dir, fields[0], algorithm, checksum))
     return files
 
 
-def _build_file_info(path: str, algorithm: str, checksum: str) -> Dict[str, Any]:
+def _rootfs_regular_file(
+    rootfs_dir: str, path: str, follow_final_link: bool = True
+) -> Optional[str]:
+    """以镜像 rootfs 为根解析链接，绝不借用扫描环境中的同名文件。"""
+
+    pending = path.split("/")
+    resolved = []
+    links = 0
+    try:
+        while pending:
+            part = pending.pop(0)
+            if part in ("", "."):
+                continue
+            if part == "..":
+                if not resolved:
+                    return None
+                resolved.pop()
+                continue
+            candidate = os.path.join(rootfs_dir, *resolved, part)
+            mode = os.lstat(candidate).st_mode
+            if stat.S_ISLNK(mode):
+                if not pending and not follow_final_link:
+                    return None
+                links += 1
+                if links > 40:
+                    return None
+                target = os.readlink(candidate)
+                if target.startswith("/"):
+                    resolved = []
+                pending = target.split("/") + pending
+            else:
+                resolved.append(part)
+        candidate = os.path.join(rootfs_dir, *resolved)
+        return candidate if stat.S_ISREG(os.lstat(candidate).st_mode) else None
+    except OSError:
+        return None
+
+
+def _build_file_info(
+    rootfs_dir: str, path: str, algorithm: str, checksum: str
+) -> Dict[str, Any]:
     """构建 Linx 文件元素。"""
 
     basename = os.path.basename(path)
     id_md5 = hashlib.md5(path.encode("utf-8")).hexdigest()[:12]
-    return {
+    file_info = {
         "id": f"File-{basename}-{id_md5}",
         "name": basename,
         "path": path,
@@ -914,6 +1023,17 @@ def _build_file_info(path: str, algorithm: str, checksum: str) -> Dict[str, Any]
             "value": checksum,
         },
     }
+    source_path = _rootfs_regular_file(rootfs_dir, path)
+    if source_path is not None:
+        algorithms = {"SHA1"}
+        if algorithm != "NOASSERTION":
+            algorithms.add(algorithm)
+        with open(source_path, "rb") as source:
+            digests = calculate_file_checksums(source, sorted(algorithms))
+        if algorithm in digests:
+            file_info["checksums"]["value"] = digests[algorithm]
+        file_info["additional_checksums"] = [{"algorithm": "SHA1", "value": digests["SHA1"]}]
+    return file_info
 
 
 def _build_license_info(license_name: str) -> Dict[str, str]:
