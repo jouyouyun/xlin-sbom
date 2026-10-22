@@ -4,7 +4,7 @@
 
 import re
 
-from beartype.typing import List
+from beartype.typing import List, Optional, Set
 
 from actions.spdx.document_utils import get_contained_spdx_element_ids
 from actions.spdx.model import Document, File
@@ -22,10 +22,12 @@ def is_spdx_id_present_in_files(spdx_id: str, files: List[File]) -> bool:
     return spdx_id in [file.spdx_id for file in files]
 
 
-def is_spdx_id_present_in_document(spdx_id: str, document: Document) -> bool:
-    all_spdx_ids_in_document: List[str] = get_list_of_all_spdx_ids(document)
-
-    return spdx_id in all_spdx_ids_in_document
+def is_spdx_id_present_in_document(
+    spdx_id: str, document: Document, spdx_ids: Optional[Set[str]] = None
+) -> bool:
+    if spdx_ids is None:
+        spdx_ids = set(get_list_of_all_spdx_ids(document))
+    return spdx_id in spdx_ids
 
 
 def get_list_of_all_spdx_ids(document: Document) -> List[str]:
@@ -44,7 +46,8 @@ def is_external_doc_ref_present_in_document(external_ref_id: str, document: Docu
 
 
 def validate_spdx_id(
-    spdx_id: str, document: Document, check_document: bool = False, check_files: bool = False
+    spdx_id: str, document: Document, check_document: bool = False, check_files: bool = False,
+    spdx_ids: Optional[Set[str]] = None,
 ) -> List[str]:
     """Test that the given spdx_id (and a potential DocumentRef to an external document) is valid
     and, if it is a reference, actually exists in the document. Optionally checks files or the whole document
@@ -87,7 +90,7 @@ def validate_spdx_id(
         )
 
     if check_document:
-        if not is_spdx_id_present_in_document(spdx_id, document):
+        if not is_spdx_id_present_in_document(spdx_id, document, spdx_ids):
             validation_messages.append(f'did not find the referenced spdx_id "{spdx_id}" in the SPDX document')
 
     if check_files:

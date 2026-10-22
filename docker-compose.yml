@@ -1,7 +1,12 @@
 services:
   linx-xiling:
-    image: linx-xiling:1.1.0
-    build: .
+    image: linx-xiling:sbomdf-fix
+    build:
+      context: .
+      dockerfile: dockerfile
+      args:
+        DEBIAN_MIRROR: http://ftp.debian.org/debian
+        DEBIAN_SECURITY_MIRROR: http://security.debian.org/debian-security
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:

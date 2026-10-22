@@ -34,6 +34,19 @@ docker images | grep linx-xiling
 docker compose run --rm linx-xiling [参数]
 ```
 
+## 从源码构建与验证
+
+修改源码后，需要重新构建镜像才能通过 Compose 验证修改。`.:/app/data` 是扫描数据挂载，程序入口 `/app/linx-xiling.py` 使用镜像内的代码。当前 Compose 默认构建和运行独立标签 `linx-xiling:sbomdf-fix`，保留已有的 `linx-xiling:1.1.0` 镜像：
+
+```bash
+docker compose build
+docker compose run --rm linx-xiling --help
+```
+
+Compose 已配置此次验证使用的 Debian 官方备用下载源，无需额外设置环境变量或输入 `--build-arg`。可通过 `docker image ls linx-xiling` 查看构建出的镜像；镜像由 Docker 管理，不会作为文件出现在项目目录中。
+
+源码仓库未包含 `actions/scanner/osv-scanner/osv-scanner_linux_amd64` 时仍可构建和进行基础扫描，但源码归档的 OSV 依赖识别会记录警告并返回空结果。如需该能力，请在构建前提供经过验证的 Linux amd64 OSV Scanner 二进制文件。SBOMDF 签名所需的 OpenSSL 由镜像安装。
+
 ## 扫描模式
 
 每次运行必须且只能选择一种扫描模式。
@@ -83,6 +96,8 @@ docker compose run --rm linx-xiling -d /app/data/linx-xiling_1.0.0.tar -o /app/o
 
 Docker 镜像扫描对象是已安装的系统包数据库；如果镜像内没有 dpkg 或 RPM 数据库，工具会给出中文错误提示。
 
+RPM 数据库识别支持 SQLite（`rpmdb.sqlite`）、BDB（`Packages`）和 NDB v0（`Packages.db`），可位于 `/var/lib/rpm` 或 `/usr/lib/sysimage/rpm`。NDB 扫描会先校验活跃包记录，并在扫描临时目录转换为 SQLite 后查询，不修改输入镜像。
+
 ### 4. 软件源扫描（`--repo` / `-r`）
 
 扫描指定的 YUM/DNF 或 APT 软件源 URL，解析仓库元数据并生成包级 SBOM。
@@ -122,6 +137,8 @@ docker compose run --rm linx-xiling -p /app/data/example.rpm -o /app/output --fo
 生成 SBOMDF 格式时，除 tar、zip 等源码归档外，必须通过 `--ecosystem` 指定 OSV 生态系统，用于从本地 Elasticsearch 漏洞库查询安全漏洞。源码归档可以省略该参数，工具会优先使用 OSV Scanner 输出的组件 ecosystem；若用户同时提供 `--ecosystem`，仅在组件缺少 ecosystem 时作为兜底值。可用生态系统可在析灵 SBOM 分析工具本地环境中通过 `docker compose run --rm es-manager list-ecosystems` 查看。
 
 Linx 格式会输出到一个目录中，并按清单类型拆分为 `packages`、`files`、`licenses`、`package_relationships`、`file_relationships` 等 JSON 文件。SPDX 相关格式与产物如下（详细差异见 [`docs/SPDX_FORMATS.md`](docs/SPDX_FORMATS.md)）：
+
+文件扫描从实际内容计算 SHA1，保存到 Linx 文件条目的 `additional_checksums`，供 SPDX 保留文件和对应关系；原 `checksums` 字段继续保留，RPM 摘要按 `FILEDIGESTALGO` 标注。RPM 声明但归档中没有内容的 ghost 文件等条目仍可能被跳过。
 
 | `--format` | 产物 |
 | --- | --- |

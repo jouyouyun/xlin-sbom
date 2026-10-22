@@ -53,12 +53,17 @@ def validate_full_spdx_document(document: Document, spdx_version: str | None = N
         )
         return validation_messages
 
+    # 本次校验共用一个索引；保留原列表用于检查重复 ID。每次调用重新
+    # 建立索引，避免修改 Document 后复用旧的校验结果。
+    all_spdx_ids: List[str] = get_list_of_all_spdx_ids(document)
+    spdx_ids = set(all_spdx_ids)
+
     validation_messages.extend(validate_creation_info(document.creation_info, spdx_version))
     validation_messages.extend(validate_packages(document.packages, spdx_version, document))
     validation_messages.extend(validate_files(document.files, spdx_version, document))
     validation_messages.extend(validate_snippets(document.snippets, spdx_version, document))
     validation_messages.extend(validate_annotations(document.annotations, document))
-    validation_messages.extend(validate_relationships(document.relationships, spdx_version, document))
+    validation_messages.extend(validate_relationships(document.relationships, spdx_version, document, spdx_ids))
     validation_messages.extend(validate_extracted_licensing_infos(document.extracted_licensing_info))
 
     document_id = document.creation_info.spdx_id
@@ -79,7 +84,6 @@ def validate_full_spdx_document(document: Document, spdx_version: str | None = N
             )
         )
 
-    all_spdx_ids: List[str] = get_list_of_all_spdx_ids(document)
     auxiliary_set = set()
     duplicated_spdx_ids = set(
         spdx_id for spdx_id in all_spdx_ids if spdx_id in auxiliary_set or auxiliary_set.add(spdx_id)

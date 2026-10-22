@@ -13,7 +13,7 @@
 # limitations under the License.
 
 from actions import ASSIST_DIR
-from actions.package import Package
+from actions.package import Package, merge_packages
 from actions.sbom_helper import build_sbom_header
 from actions.data_helper import read_data_from_json, save_data_to_json, remove_duplicates
 from actions.scanner.suppliers_helper import get_suppliers, RPM_SUPPLIERS, DEB_SUPPLIERS
@@ -62,6 +62,7 @@ def rpm_repo_scanner(
         packages, licenses, originators = _parse_primary_xml(
             metadata, originators, disable_tqdm)
     
+    packages = merge_packages(packages)
     packages_sbom = [package.get_json() for package in packages]
 
     linx_sbom = {
@@ -106,6 +107,7 @@ def deb_repo_scanner(
             packages.extend(packages_)
             licenses.extend(licenses_)
     
+    packages = merge_packages(packages)
     packages_sbom = [package.get_json() for package in packages]
 
     linx_sbom = {

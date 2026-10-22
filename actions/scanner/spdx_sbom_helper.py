@@ -21,6 +21,7 @@ import os
 import re
 import uuid
 from datetime import datetime, timezone
+from time import perf_counter
 from typing import Any, Dict, List, Optional, Set, Union
 
 from actions import ASSIST_DIR
@@ -107,6 +108,12 @@ def convert_to_spdx_document(
     if spdx_version not in ("SPDX-2.2", "SPDX-2.3"):
         raise ValueError(f"不支持的 SPDX 版本: {spdx_version}")
 
+    started = perf_counter()
+    logging.info(
+        "开始转换 %s：软件包 %d 个，文件 %d 个",
+        spdx_version, len(linx_sbom.get("packages_sbom", {}).get("packages", [])),
+        len(linx_sbom.get("files_sbom", {}).get("files", [])))
+
     creators = _parse_creators()
     created = _parse_created_time(created_time)
     safe_name = _SPDX_ID_SAFE.sub("-", filename) or "document"
@@ -150,18 +157,23 @@ def convert_to_spdx_document(
         for license_info in linx_sbom.get("licenses_sbom", {}).get("licenses", [])
     ]
 
-    return Document(
+    document = Document(
         creation_info=creation_info,
         packages=packages,
         files=files,
         relationships=relationships,
         extracted_licensing_info=extracted,
     )
+    logging.info(
+        "%s 转换完成：软件包 %d 个，文件 %d 个，关系 %d 条，耗时 %.2f 秒",
+        spdx_version, len(packages), len(files), len(relationships), perf_counter() - started)
+    return document
 
 
 def write_spdx23(document: Document, path: str) -> None:
     """校验并通过后写出 SPDX 2.3 JSON。失败抛出 ValueError，不落盘。"""
     _validate_or_raise(document, "SPDX-2.3")
+    logging.info("开始保存 SPDX-2.3 文件: %s", path)
     write_document_to_file(document, path, validate=False)
 
 
@@ -170,6 +182,7 @@ def write_spdx22(document: Document, path: str) -> None:
     if document.creation_info.spdx_version != "SPDX-2.2":
         raise ValueError("write_spdx22 需要 spdx_version 为 SPDX-2.2 的 Document")
     _validate_or_raise(document, "SPDX-2.2")
+    logging.info("开始保存 SPDX-2.2 文件: %s", path)
     write_document_to_file(document, path, validate=False)
 
 
@@ -194,11 +207,16 @@ def write_spdx3_payload(payload: Payload, path_without_ext: str) -> str:
 
 
 def _validate_or_raise(document: Document, spdx_version: str) -> None:
+    started = perf_counter()
+    logging.info(
+        "开始校验 %s：软件包 %d 个，文件 %d 个，关系 %d 条",
+        spdx_version, len(document.packages), len(document.files), len(document.relationships))
     messages = validate_full_spdx_document(document, spdx_version)
     if messages:
         detail = "; ".join(str(message) for message in messages)
         logging.error(f"SPDX {spdx_version} 校验失败，不写出文件: {detail}")
         raise ValueError(f"SPDX {spdx_version} 校验失败: {detail}")
+    logging.info("%s 校验通过，耗时 %.2f 秒", spdx_version, perf_counter() - started)
 
 
 def _parse_created_time(created_time: str) -> datetime:
@@ -370,13 +388,15 @@ def _build_package(
 def _build_file(
     file_info: Dict[str, Any], spdx_version: str
 ) -> Optional[File]:
-    checksum_info = file_info.get("checksums", {}) or {}
-    mapped = _map_checksum(
-        checksum_info.get("algorithm"), checksum_info.get("value"), spdx_version
-    )
+    checksum_infos = list(file_info.get("additional_checksums", []) or [])
+    checksum_infos.append(file_info.get("checksums", {}) or {})
     checksums: List[Checksum] = []
-    if mapped is not None:
-        checksums.append(mapped)
+    for checksum_info in checksum_infos:
+        mapped = _map_checksum(
+            checksum_info.get("algorithm"), checksum_info.get("value"), spdx_version
+        )
+        if mapped is not None and not any(c.algorithm == mapped.algorithm for c in checksums):
+            checksums.append(mapped)
 
     has_sha1 = any(c.algorithm == ChecksumAlgorithm.SHA1 for c in checksums)
     if not has_sha1:
@@ -387,6 +407,8 @@ def _build_file(
         return None
 
     file_name = file_info.get("path") or file_info.get("name") or "NOASSERTION"
+    if file_name.startswith("/"):
+        file_name = "." + file_name
     kwargs: Dict[str, Any] = {
         "name": file_name,
         "spdx_id": _spdx_id(str(file_info.get("id"))),

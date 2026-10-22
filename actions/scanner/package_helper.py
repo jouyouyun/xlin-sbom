@@ -13,7 +13,7 @@
 # limitations under the License.
 
 from actions import ASSIST_DIR
-from actions.package import Package
+from actions.package import Package, merge_packages
 from actions.sbom_helper import build_sbom_header
 from actions.scanner.package_files_helper import (
     rpm_files_scanner,
@@ -27,7 +27,9 @@ from actions.data_helper import (
     calculate_sha1,
     save_data_to_json,
     read_data_from_json,
-    remove_duplicates
+    remove_duplicates,
+    remove_duplicate_files,
+    remove_duplicate_relationships
 )
 from actions.scanner.suppliers_helper import (
     get_suppliers,
@@ -104,10 +106,11 @@ def package_scanner(pkg_path, pkg_type, created_time, include, exclude, workers,
         package, licenses, originators, dependency_packages, package_relationships = process_source_package(
             pkg_path, originators, include, exclude, workers, disable_tqdm, brief_mode)
 
-    packages_sbom = [package.get_json()] if package else []
-    packages_sbom.extend(dependency.get_json() for dependency in dependency_packages)
-    package_files = package.files if package else []
-    file_relationships_sbom = package.get_file_relationships() if package else []
+    packages = merge_packages(([package] if package else []) + dependency_packages)
+    packages_sbom = [item.get_json() for item in packages]
+    package_files = remove_duplicate_files([file for item in packages for file in item.files])
+    file_relationships_sbom = [relationship for item in packages for relationship in item.get_file_relationships()]
+    package_relationships = remove_duplicate_relationships(package_relationships)
 
     linx_sbom = {
         "packages_sbom": build_sbom_header(packages_sbom, "packages", pkg_name, created_time),

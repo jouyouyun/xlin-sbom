@@ -30,7 +30,7 @@ from typing import Any, Dict, List, Tuple, Optional
 from scancode import api as scancode
 from actions import OSV_SCANNER
 from actions.data_helper import (
-    calculate_md5,
+    calculate_file_checksums,
     remove_duplicates
 )
 from actions.licenses_helper import rpm_licenses_scanner
@@ -228,7 +228,7 @@ def _process_member(member: Tuple[str, str]) -> Tuple[Optional[Dict[str, Any]], 
         license_id_list = []
 
     with open(member_path, 'rb') as f:
-        file_md5 = calculate_md5(f)
+        digests = calculate_file_checksums(f)
 
     file_info = {
         "id": f"File-{name}-{id_md5}",
@@ -238,8 +238,9 @@ def _process_member(member: Tuple[str, str]) -> Tuple[Optional[Dict[str, Any]], 
         "holders": holders,
         "checksums": {
             "algorithm": "MD5",
-            "value": file_md5
-        }
+            "value": digests["MD5"]
+        },
+        "additional_checksums": [{"algorithm": "SHA1", "value": digests["SHA1"]}]
     }
 
     return file_info, licenses

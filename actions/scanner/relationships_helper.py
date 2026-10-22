@@ -17,6 +17,7 @@ from typing import List, Dict, Any
 from tqdm import tqdm
 import logging
 import re
+from actions.data_helper import remove_duplicate_relationships
 
 
 def get_deb_relationships(packages, disable_tqdm):
@@ -61,7 +62,7 @@ def get_deb_relationships(packages, disable_tqdm):
                             "relationship_type": "DEPENDS_ON"
                         })
 
-    return relationships
+    return remove_duplicate_relationships(relationships)
 
 def get_rpm_relationships(
     packages: List[Dict[str, Any]],
@@ -102,7 +103,7 @@ def get_rpm_relationships(
     if not disable_tqdm:
         package_iter.close()  # 确保 tqdm 资源被正确关闭
 
-    return relationships
+    return remove_duplicate_relationships(relationships)
 
 
 def _strip_version_specifier(s):

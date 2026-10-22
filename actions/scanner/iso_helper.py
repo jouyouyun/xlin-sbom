@@ -13,6 +13,7 @@
 # limitations under the License.
 
 from actions import ASSIST_DIR
+from actions.package import merge_packages
 from actions.sbom_helper import build_sbom_header
 from actions.scanner.relationships_helper import (
     get_rpm_relationships,
@@ -21,7 +22,8 @@ from actions.scanner.relationships_helper import (
 from actions.data_helper import (
     save_data_to_json,
     read_data_from_json,
-    remove_duplicates
+    remove_duplicates,
+    remove_duplicate_files
 )
 from actions.scanner.package_helper import (
     process_rpm_package,
@@ -177,8 +179,6 @@ def _scan_deb_entries(
                     package, package_licenses, updated_originators = result
                     if package:
                         packages.append(package)
-                        files.extend(package.files)
-                        file_relationships.extend(package.get_file_relationships())
                         licenses.extend(package_licenses)
                         originators = updated_originators
                 if not disable_tqdm:
@@ -187,7 +187,9 @@ def _scan_deb_entries(
             if not disable_tqdm:
                 progress_iter.close()
 
-    files = remove_duplicates(files)
+    packages = merge_packages(packages)
+    files = remove_duplicate_files([file for package in packages for file in package.files])
+    file_relationships = [relationship for package in packages for relationship in package.get_file_relationships()]
     licenses = remove_duplicates(licenses)
 
     packages_sbom = [package.get_json() for package in packages]
@@ -250,8 +252,6 @@ def _scan_rpm_entries(
                     package, package_licenses, updated_originators, provides = result
                     if package:
                         packages.append(package)
-                        files.extend(package.files)
-                        file_relationships.extend(package.get_file_relationships())
                         licenses.extend(package_licenses)
                         originators = updated_originators
                         if provides:
@@ -262,7 +262,9 @@ def _scan_rpm_entries(
             if not disable_tqdm:
                 progress_iter.close()
 
-    files = remove_duplicates(files)
+    packages = merge_packages(packages)
+    files = remove_duplicate_files([file for package in packages for file in package.files])
+    file_relationships = [relationship for package in packages for relationship in package.get_file_relationships()]
     licenses = remove_duplicates(licenses)
 
     packages_sbom = [package.get_json() for package in packages]
