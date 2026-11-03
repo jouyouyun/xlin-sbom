@@ -1,6 +1,6 @@
 services:
   linx-xiling:
-    image: linx-xiling:sbomdf-fix
+    image: linx-xiling:1.1.1
     build:
       context: .
       dockerfile: dockerfile

@@ -4,7 +4,7 @@
 
 析灵 SBOM 生成工具用于扫描 ISO 镜像、Docker 镜像、单个软件包（`.rpm`、`.deb`、`.src.rpm`、源码压缩包、Debian 源码描述文件）或软件更新源 URL，并生成软件物料清单（Software Bill of Materials，SBOM）。
 
-工具支持输出 Linx 格式、SPDX 2.3 格式和 GB/T 47020-2026 格式的 SBOM 清单。运行时必须通过 `--format` 参数显式指定一种或多种输出格式。
+工具支持输出 Linx 格式、SPDX 2.2、SPDX 2.3、SPDX 3.0 格式和 SBOMDF（GB/T 47020-2026）格式的 SBOM 清单。运行时必须通过 `--format` 参数显式指定一种或多种输出格式。
 
 项目以容器化方式交付，可通过 Docker Compose 运行，避免手动配置运行环境。
 
@@ -22,7 +22,7 @@
 ## 镜像获取与加载
 
 ```bash
-docker load -i linx-xiling-1.1.0.tar
+docker load -i image/linx-xiling_1.1.1.tar
 docker images | grep linx-xiling
 ```
 
@@ -34,23 +34,9 @@ docker images | grep linx-xiling
 docker compose run --rm linx-xiling [参数]
 ```
 
-## 从源码构建与验证
-
-修改源码后，需要重新构建镜像才能通过 Compose 验证修改。`.:/app/data` 是扫描数据挂载，程序入口 `/app/linx-xiling.py` 使用镜像内的代码。当前 Compose 默认构建和运行独立标签 `linx-xiling:sbomdf-fix`，保留已有的 `linx-xiling:1.1.0` 镜像：
-
-```bash
-docker compose build
-docker compose run --rm linx-xiling --help
-```
-
-Compose 已配置此次验证使用的 Debian 官方备用下载源，无需额外设置环境变量或输入 `--build-arg`。可通过 `docker image ls linx-xiling` 查看构建出的镜像；镜像由 Docker 管理，不会作为文件出现在项目目录中。
-
-源码仓库未包含 `actions/scanner/osv-scanner/osv-scanner_linux_amd64` 时仍可构建和进行基础扫描，但源码归档的 OSV 依赖识别会记录警告并返回空结果。如需该能力，请在构建前提供经过验证的 Linux amd64 OSV Scanner 二进制文件。SBOMDF 签名所需的 OpenSSL 由镜像安装。
-
 ## 扫描模式
 
-每次运行必须且只能选择一种扫描模式。
-
+每次运行必须且只能选择一种扫描模式。请将待扫描目标放置于工具根目录下。
 ### 1. ISO 镜像扫描（`--iso` / `-i`）
 
 扫描本地 ISO 镜像，识别其中的 RPM 或 DEB 软件包，并生成 SBOM。
@@ -72,7 +58,7 @@ docker compose run --rm linx-xiling -i /app/data/<镜像文件.iso> -o /app/outp
 docker compose run --rm linx-xiling -p /app/data/<软件包文件> -o /app/output --format linx --format spdx
 ```
 
-源码包在 v1.1.0 中已经拆分为独立处理策略。其中 `.src.rpm` 会继续使用 RPM spec 信息并支持源码文件级扫描；tar、zip 源码归档会安全解压后进行文件级许可证扫描，并通过内置 OSV Scanner 识别常见语言生态的依赖信息。生成 SBOMDF（GB/T 47020-2026）格式时，源码归档依赖会优先使用 OSV Scanner 结果中每个组件自己的 ecosystem 查询漏洞，`--ecosystem` 仅作为缺少组件生态系统时的兜底值。若源码归档中缺少依赖清单文件，或运行环境无法访问 OSV 在线服务，依赖结果可能为空，但工具仍会保留可获取的包级、文件级和许可证 SBOM。Debian `.dsc` 会生成可从描述文件中获取的包级 SBOM。
+源码包在 v1.1.1 中已经拆分为独立处理策略。其中 `.src.rpm` 会继续使用 RPM spec 信息并支持源码文件级扫描；tar、zip 源码归档会安全解压后进行文件级许可证扫描，并通过内置 OSV Scanner 识别常见语言生态的依赖信息。生成 SBOMDF 格式时，源码归档依赖会优先使用 OSV Scanner 结果中每个组件自己的 ecosystem 查询漏洞，`--ecosystem` 仅作为缺少组件生态系统时的兜底值。若源码归档中缺少依赖清单文件，或运行环境无法访问 OSV 在线服务，依赖结果可能为空，但工具仍会保留可获取的包级、文件级和许可证 SBOM。Debian `.dsc` 会生成可从描述文件中获取的包级 SBOM。
 
 源码文件级扫描默认读取配置文件中的 `source_scan.include_file_patterns`，仅扫描常见源码文件和许可证/版权声明文件。用户可修改宿主机上的 `./config/config.json` 调整 include、exclude、线程数、进度条和源码扫描精简模式等运行参数。
 
@@ -96,8 +82,6 @@ docker compose run --rm linx-xiling -d /app/data/linx-xiling_1.0.0.tar -o /app/o
 
 Docker 镜像扫描对象是已安装的系统包数据库；如果镜像内没有 dpkg 或 RPM 数据库，工具会给出中文错误提示。
 
-RPM 数据库识别支持 SQLite（`rpmdb.sqlite`）、BDB（`Packages`）和 NDB v0（`Packages.db`），可位于 `/var/lib/rpm` 或 `/usr/lib/sysimage/rpm`。NDB 扫描会先校验活跃包记录，并在扫描临时目录转换为 SQLite 后查询，不修改输入镜像。
-
 ### 4. 软件源扫描（`--repo` / `-r`）
 
 扫描指定的 YUM/DNF 或 APT 软件源 URL，解析仓库元数据并生成包级 SBOM。
@@ -106,7 +90,7 @@ RPM 数据库识别支持 SQLite（`rpmdb.sqlite`）、BDB（`Packages`）和 ND
 docker compose run --rm linx-xiling -r https://mirrors.example.com/centos/8-stream/BaseOS/x86_64/os/ -o /app/output --format linx --format spdx
 ```
 
-软件源元数据通常只能提供包和许可证等包级信息，无法可靠提供包内文件、文件关系和包间依赖关系，因此 repo 扫描仅输出可从仓库元数据获取的清单内容。由于 SBOMDF（GB/T 47020-2026）格式需要软件信息，repo 扫描不支持 `--format sbomdf`。
+软件源元数据通常只能提供包和许可证等包级信息，无法可靠提供包内文件、文件关系和包间依赖关系，因此 repo 扫描仅输出可从仓库元数据获取的清单内容。由于 GB/T 47020-2026 格式需要软件信息，repo 扫描不支持 `--format sbomdf`。
 
 ## 输出格式
 
@@ -122,13 +106,7 @@ docker compose run --rm linx-xiling -p /app/data/example.rpm -o /app/output --fo
 docker compose run --rm linx-xiling -p /app/data/example.rpm -o /app/output --format spdx
 ```
 
-显式同时输出 Linx 和 SPDX：
-
-```bash
-docker compose run --rm linx-xiling -p /app/data/example.rpm -o /app/output --format linx --format spdx
-```
-
-输出 SBOMDF（GB/T 47020-2026）格式：
+输出 GB/T 47020-2026 格式：
 
 ```bash
 docker compose run --rm linx-xiling -p /app/data/example.rpm -o /app/output --format sbomdf --ecosystem PyPI
@@ -136,24 +114,14 @@ docker compose run --rm linx-xiling -p /app/data/example.rpm -o /app/output --fo
 
 生成 SBOMDF 格式时，除 tar、zip 等源码归档外，必须通过 `--ecosystem` 指定 OSV 生态系统，用于从本地 Elasticsearch 漏洞库查询安全漏洞。源码归档可以省略该参数，工具会优先使用 OSV Scanner 输出的组件 ecosystem；若用户同时提供 `--ecosystem`，仅在组件缺少 ecosystem 时作为兜底值。可用生态系统可在析灵 SBOM 分析工具本地环境中通过 `docker compose run --rm es-manager list-ecosystems` 查看。
 
-Linx 格式会输出到一个目录中，并按清单类型拆分为 `packages`、`files`、`licenses`、`package_relationships`、`file_relationships` 等 JSON 文件。SPDX 相关格式与产物如下（详细差异见 [`docs/SPDX_FORMATS.md`](docs/SPDX_FORMATS.md)）：
-
-文件扫描从实际内容计算 SHA1，保存到 Linx 文件条目的 `additional_checksums`，供 SPDX 保留文件和对应关系；原 `checksums` 字段继续保留，RPM 摘要按 `FILEDIGESTALGO` 标注。RPM 声明但归档中没有内容的 ghost 文件等条目仍可能被跳过。
-
-| `--format` | 产物 |
-| --- | --- |
-| `linx` | `linx-sbom_*` 多文件目录 |
-| `spdx22` | `spdx22-sbom_*.json`（SPDX 2.2） |
-| `spdx` / `spdx23` | `spdx-sbom_*.json`（SPDX 2.3；二者等价，只写出一份） |
-| `spdx3` | `spdx3-sbom_*.jsonld`（SPDX 3.0 JSON-LD） |
-| `sbomdf` | `sbomdf-sbom_*` 目录，含 `*.SBOMDF.json`、`signature.sig`、`certification.pem` |
+Linx 格式会输出到一个目录中，并按清单类型拆分为 `packages`、`files`、`licenses`、`package_relationships`、`file_relationships` 等 JSON 文件。SPDX 格式根据参数输出：`spdx22` 生成 SPDX 2.2 JSON 文件，`spdx` 或 `spdx23` 生成 SPDX 2.3 JSON 文件，`spdx3` 生成 SPDX 3.0 JSON-LD 文件。SBOMDF 格式会输出到独立目录，目录中包含 `*.SBOMDF.json`、`signature.sig` 和 `certification.pem`。
 
 ## 可选参数
 
 | 参数 | 说明 |
 | --- | --- |
 | `--help`, `-h` | 显示帮助信息并退出 |
-| `--format {linx,spdx,spdx22,spdx23,spdx3,sbomdf}` | 必填。指定输出格式，可重复指定；`spdx` 与 `spdx23` 为 SPDX 2.3 别名 |
+| `--format {linx,spdx,spdx22,spdx23,spdx3,sbomdf}` | 必填。指定输出格式，可重复指定；`spdx22` 为 SPDX 2.2，`spdx` 与 `spdx23` 为 SPDX 2.3，`spdx3` 为 SPDX 3.0，`sbomdf` 为 GB/T 47020-2026 格式 |
 | `--ecosystem <生态系统>` | 生成 SBOMDF 格式时用于 OSV/Elasticsearch 漏洞查询；源码归档可省略，其他扫描对象必填 |
 
 ## 配置文件
@@ -181,9 +149,7 @@ Linx 格式会输出到一个目录中，并按清单类型拆分为 `packages`�
             "http://host.docker.internal:9200"
         ],
         "index_name": "osv_vulnerability_db",
-        "api_key": "",
-        "verify_certs": true,
-        "ca_certs": ""
+        "api_key": ""
     }
 }
 ```
@@ -199,10 +165,6 @@ Linx 格式会输出到一个目录中，并按清单类型拆分为 `packages`�
 | `elastic_search.hosts` | 本地 OSV Elasticsearch 节点地址列表 |
 | `elastic_search.index_name` | OSV 漏洞索引名称 |
 | `elastic_search.api_key` | Elasticsearch API Key，默认留空；需要认证时在外部配置中填写 |
-| `elastic_search.verify_certs` | 是否校验 Elasticsearch HTTPS 证书，默认为 `true`；无法提供可信 CA 的受控内网环境可显式设为 `false` |
-| `elastic_search.ca_certs` | Elasticsearch HTTPS CA 证书在容器内的路径；仅在启用证书校验且该值非空时使用 |
-
-当 `verify_certs` 为 `true` 且 `ca_certs` 为空时，工具使用运行环境的默认 CA 校验证书；指定 `ca_certs` 时使用该文件；设为 `false` 时跳过证书校验。关闭证书校验会失去 Elasticsearch 服务端身份验证能力，应仅用于网络边界明确的受控内网环境。
 
 ## 故障排除
 

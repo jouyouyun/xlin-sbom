@@ -7,3 +7,8 @@ __pycache__
 log
 output
 ceshilizi
+*.rpm
+*.deb
+*.iso
+*.tar
+*.tar.gz
