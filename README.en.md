@@ -2,7 +2,7 @@
 
 ## Overview
 
-The XiLing SBOM Tool is designed to scan ISO images, Docker images, software packages (`.rpm` / `.deb` / `.src.rpm` / source archives), or software repository URLs. It generates Software Bill of Materials (SBOM) manifests in explicitly requested Linx, SPDX 2.3, and GB/T 47020-2026 formats. Delivered as a containerized application, the tool can be run with a single command via Docker Compose, eliminating the need for manual dependency management and environment configuration.
+The XiLing SBOM Tool is designed to scan ISO images, Docker images, software packages (`.rpm` / `.deb` / `.src.rpm` / source archives / `.dsc` files), or software repository URLs. It generates Software Bill of Materials (SBOM) manifests in explicitly requested Linx, SPDX 2.2, SPDX 2.3, SPDX 3.0, and SBOMDF (GB/T 47020-2026) formats. This manual applies to version 1.1.1. Delivered as a containerized application, the tool can be run with a single command via Docker Compose, eliminating the need for manual dependency management and environment configuration.
 
 ## System Requirements
 
@@ -17,10 +17,11 @@ The XiLing SBOM Tool is designed to scan ISO images, Docker images, software pac
 
 ## Image Acquisition and Loading
 
-```bash
-docker load -i linx-xiling-1.0.0.tar
-docker images | grep linx-xiling      # Verify loading
+Run the following commands from the extracted `linx-xiling-dist` directory:
 
+```bash
+docker load -i image/linx-xiling_1.1.1.tar
+docker images | grep linx-xiling      # Verify loading
 ```
 
 ## Quick Start
@@ -29,27 +30,13 @@ Before running any scan tasks, please ensure you are in the directory containing
 
 ```bash
 docker compose run --rm linx-xiling [options]
-
 ```
-
-## Build and Verify Current Source
-
-Rebuild the image after changing source code. The `.:/app/data` mount supplies scan data; `/app/linx-xiling.py` runs the code packaged in the image. Compose builds and runs the separate tag `linx-xiling:sbomdf-fix` by default, preserving an existing `linx-xiling:1.1.0` image:
-
-```bash
-docker compose build
-docker compose run --rm linx-xiling --help
-```
-
-Compose already configures the Debian download mirrors used during validation. No environment variable or extra `--build-arg` options are needed. Use `docker image ls linx-xiling` to view images managed by Docker; images are not files in the project directory.
-
-The source checkout can be built without `actions/scanner/osv-scanner/osv-scanner_linux_amd64`. In that case, source archive OSV dependency detection logs a warning and returns empty results. Supply a verified Linux amd64 OSV Scanner binary before building if that capability is required. The image installs OpenSSL for SBOMDF signing.
 
 ---
 
 ## Scan Modes in Detail
 
-The tool provides four scanning modes. You must select one, and only one, mode per run.
+The tool provides four scanning modes. You must select one, and only one, mode per run. Place local scan targets in the directory containing `docker-compose.yml`; they are available inside the container under `/app/data`. Results written to `/app/output` are saved in the host `output/` directory.
 
 ### 1. ISO Image Scan (`--iso` / `-i`)
 
@@ -58,15 +45,13 @@ Performs a complete scan of a local ISO image file, extracts information for all
 **Command Format**:
 
 ```bash
-docker compose run --rm linx-xiling -i /app/data/<image_file.iso> -o output/ --format linx --format spdx
-
+docker compose run --rm linx-xiling -i /app/data/<image_file.iso> -o /app/output --format linx --format spdx
 ```
 
 **Example**:
 
 ```bash
-docker compose run --rm linx-xiling -i /app/data/centos-8-stream.iso -o output/ --format linx --format spdx
-
+docker compose run --rm linx-xiling -i /app/data/centos-8-stream.iso -o /app/output --format linx --format spdx
 ```
 
 ### 2. Software Package Scan (`--package` / `-p`)
@@ -76,15 +61,13 @@ Scans a single software package file and generates its SBOM manifest. Supported 
 **Command Format**:
 
 ```bash
-docker compose run --rm linx-xiling -p /app/data/<package_file> -o output/ --format linx --format spdx
-
+docker compose run --rm linx-xiling -p /app/data/<package_file> -o /app/output --format linx --format spdx
 ```
 
 **Example**:
 
 ```bash
-docker compose run --rm linx-xiling -p /app/data/zvbi-0.2.35-8.oe2203sp4.src.rpm -o output/ --format linx --format spdx
-
+docker compose run --rm linx-xiling -p /app/data/zvbi-0.2.35-8.oe2203sp4.src.rpm -o /app/output --format linx --format spdx
 ```
 
 Source archives are unpacked safely for file-level license scanning. The bundled OSV Scanner also detects dependencies from common ecosystem manifest files. If no supported dependency manifest is present, or the runtime cannot reach the online OSV service, dependency results may be empty while package, file, and license SBOM output is still generated. Source file-level scanning reads `source_scan.include_file_patterns` from the configuration file by default, so only common source files and license/copyright notices are scanned unless you adjust `./config/config.json`.
@@ -96,8 +79,7 @@ Scans a public Docker Hub image or an offline Docker image tar archive. The scan
 **Docker Hub image**:
 
 ```bash
-docker compose run --rm linx-xiling -d debian:bookworm-slim -o output/ --format linx --format spdx
-
+docker compose run --rm linx-xiling -d debian:bookworm-slim -o /app/output --format linx --format spdx
 ```
 
 For multi-platform images, the platform is controlled by `scan.platform` in the configuration file. The default value is `linux/amd64`.
@@ -105,8 +87,7 @@ For multi-platform images, the platform is controlled by `scan.platform` in the 
 **Offline image tar**:
 
 ```bash
-docker compose run --rm linx-xiling -d /app/data/linx-xiling_1.0.0.tar -o output/ --format linx --format spdx
-
+docker compose run --rm linx-xiling -d /app/data/linx-xiling_1.1.1.tar -o /app/output --format linx --format spdx
 ```
 
 Docker image scanning depends on installed package databases in the final filesystem. Images without dpkg or RPM databases, such as scratch or some distroless images, cannot produce system package SBOMs in this version.
@@ -115,29 +96,25 @@ RPM database detection supports SQLite (`rpmdb.sqlite`), BDB (`Packages`), and N
 
 ### 4. Repository Scan (`--repo` / `-r`)
 
-Scans a specified software repository URL (such as a YUM/APT repository), recursively analyzes all software packages within the repository, and generates a comprehensive SBOM.
+Scans a specified YUM/DNF or APT repository URL, parses repository metadata, and generates a package-level SBOM. Repository metadata generally provides package and license information, but does not reliably provide file-level information or package dependencies.
 
 Repository metadata does not provide reliable software-level information, so repository scans do not support `--format sbomdf`.
 
 **Command Format**:
 
 ```bash
-docker compose run --rm linx-xiling -r <repository_URL> -o output/ --format linx --format spdx
-
+docker compose run --rm linx-xiling -r <repository_URL> -o /app/output --format linx --format spdx
 ```
 
 **Example**:
 
 ```bash
-docker compose run --rm linx-xiling -r https://mirrors.example.com/centos/8-stream/BaseOS/x86_64/os/ -o output/ --format linx --format spdx
-
+docker compose run --rm linx-xiling -r https://mirrors.example.com/centos/8-stream/BaseOS/x86_64/os/ -o /app/output --format linx --format spdx
 ```
 
 ---
 
 ## Optional Parameters
-
-> **Breaking change:** `--format gbt` has been renamed to `--format sbomdf` with no compatibility alias. Output directory prefixes changed from `gbt-sbom_*` to `sbomdf-sbom_*`.
 
 In addition to the required scan mode and output parameters, the CLI keeps the following arguments:
 
@@ -145,9 +122,9 @@ In addition to the required scan mode and output parameters, the CLI keeps the f
 | --- | --- |
 | `--help`, `-h` | Show help message and exit |
 | `--format {linx,spdx,spdx22,spdx23,spdx3,sbomdf}` | Required output format; can be repeated. `spdx` and `spdx23` are SPDX 2.3 aliases |
-| `--ecosystem <ecosystem>` | Required for SBOMDF output; used for OSV/Elasticsearch vulnerability queries |
+| `--ecosystem <ecosystem>` | OSV ecosystem for SBOMDF vulnerability queries; required for inputs other than source archives, and optional as a fallback for source archives |
 
-Supported formats (see [`docs/SPDX_FORMATS.md`](docs/SPDX_FORMATS.md)): `linx`, `spdx22` (SPDX 2.2), `spdx`/`spdx23` (SPDX 2.3), `spdx3` (SPDX 3.0 JSON-LD), `sbomdf` (GB/T 47020-2026).
+Supported formats: `linx`, `spdx22` (SPDX 2.2), `spdx`/`spdx23` (SPDX 2.3), `spdx3` (SPDX 3.0 JSON-LD), `sbomdf` (GB/T 47020-2026).
 
 SBOMDF (GB/T 47020-2026) output example:
 
@@ -155,7 +132,9 @@ SBOMDF (GB/T 47020-2026) output example:
 docker compose run --rm linx-xiling -p /app/data/example.rpm -o /app/output --format sbomdf --ecosystem PyPI
 ```
 
-SBOMDF output requires `--ecosystem` so the tool can query vulnerabilities from the local OSV Elasticsearch database. The generated SBOMDF directory contains `*.SBOMDF.json`, `signature.sig`, and `certification.pem`.
+SBOMDF output queries vulnerabilities from the local OSV Elasticsearch database. For inputs other than tar/zip source archives, specify the matching OSV ecosystem with `--ecosystem`. Source archives use each component's ecosystem detected by OSV Scanner; the supplied `--ecosystem` is used only as a fallback when that information is unavailable. Available ecosystems can be listed in the companion XiLing SBOM analysis environment with `docker compose run --rm es-manager list-ecosystems`.
+
+Linx output is a directory containing JSON files for packages, files, licenses, and their relationships. SPDX 2.2 and 2.3 output is JSON; SPDX 3.0 output is JSON-LD. The generated SBOMDF directory contains `*.SBOMDF.json`, `signature.sig`, and `certification.pem`.
 
 ---
 
@@ -213,10 +192,7 @@ When `verify_certs` is `true` and `ca_certs` is empty, the tool uses the runtime
 
 * **Symptom**: Prompts `docker: 'compose' is not a docker command` or `The Compose file is invalid`.
 * **Solution**:
-* Check the `docker-compose.yml` file version. For older Docker environments, ensure the file starts with `version: '2.2'`.
 * If your system only supports Docker Compose V1, replace `docker compose` with `docker-compose` in your commands.
-
-
 
 ### 2. Network Connection Failure During Repository Scan
 
@@ -226,24 +202,14 @@ When `verify_certs` is `true` and `ca_certs` is empty, the tool uses the runtime
 * Add `network_mode: host` to the service in `docker-compose.yml` or configure DNS (`dns: 8.8.8.8`).
 * If a proxy is required, set the `HTTP_PROXY` / `HTTPS_PROXY` environment variables.
 
-
-
 ### 3. No Files Generated in the Output Directory
 
 * **Cause**: The `./output` directory on the host does not exist or lacks write permissions.
 * **Solution**: Manually create the directory and grant permissions:
+
 ```bash
 mkdir -p ./output
 chmod 755 ./output
-
-```
-
-
-
----
-
-*XiLing SBOM Tool — Making software supply chain assets clear at a glance.*
-
 ```
 
 ### 4. Docker Hub Image Pull Failure
@@ -253,3 +219,7 @@ The current version supports anonymous pulls for public Docker Hub images only. 
 ### 5. Docker Image Package System Not Detected
 
 Docker image scanning requires `/var/lib/dpkg/status` or an RPM database in the final image filesystem. Images built from scratch, distroless images, or images that remove package manager metadata cannot be scanned as OS package images in this version.
+
+---
+
+*XiLing SBOM Tool — Making software supply chain assets clear at a glance.*

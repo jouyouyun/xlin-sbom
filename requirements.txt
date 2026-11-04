@@ -12,3 +12,4 @@ beartype==0.19.0
 license_expression==30.4.1
 semantic_version==2.10.0
 uritools==4.0.0
+pluggy==1.6.0
