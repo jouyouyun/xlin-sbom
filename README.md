@@ -166,6 +166,49 @@ Linx 格式会输出到一个目录中，并按清单类型拆分为 `packages`�
 | `elastic_search.index_name` | OSV 漏洞索引名称 |
 | `elastic_search.api_key` | Elasticsearch API Key，默认留空；需要认证时在外部配置中填写 |
 
+## 构建 deb 与 rpm 安装包
+
+仓库提供 `debian/` 与 `rpm/` 两套打包文件。安装包只包含应用代码、配置和启动脚本，
+不放置 Python 第三方依赖，也不内嵌私有 CPython 运行时；运行期统一使用发行版提供的
+`python3` 及其 `python3-*` 模块，因此不会出现扩展模块 ABI 与系统解释器不一致的问题。
+
+deb 运行依赖：`python3 (>= 3.11)`、`python3-debian`、
+`python3-license-expression`、`python3-tqdm`、`python3-requests`、`python3-bs4`、
+`python3-chardet`、`python3-semantic-version`、`python3-rpm`、`openssl`、`rpm`、`zstd`。
+`python3-zstandard`、`python3-pycdlib` 用于可选能力（前者缺失时回退到 `zstd` 命令），
+`scancode-toolkit` 用于源码许可证识别，均为可选依赖。
+
+rpm 运行依赖：`python3`、`python3-pycdlib`、`python3-tqdm`、
+`python3-requests`、`python3-beautifulsoup4`、`python3-chardet`、
+`python3-semantic_version`、`python3-rpm`、`python3-license-expression`、`openssl`、
+`rpm`、`zstd`；`python3-zstandard`、`python3-debian` 和 `scancode-toolkit` 为可选依赖。openEuler 24.03 官方仓库
+暂未提供 `python3-license-expression`，需要由发行版仓库补齐后再安装。
+
+在 Debian 12 或更新版本中构建 deb 包：
+
+```bash
+./debian/build-in-docker.sh
+```
+
+在 openEuler 24.03 或更新版本中构建 rpm 包：
+
+```bash
+./rpm/build-in-docker.sh
+```
+
+两个脚本都通过 Docker 完成构建，产物分别写入 `debian/output/` 和 `rpm/output/`。默认镜像为
+`debian:12` 与 `openeuler/openeuler:24.03`，可用 `IMAGE` 环境变量覆盖；构建脚本也接受一个
+参数指定输出目录。
+
+也可以进入对应系统的构建容器后，直接执行 `dpkg-buildpackage -us -uc -b` 或
+`rpmbuild -bb rpm/xlin-sbom.spec`。deb 安装包把配置文件放在 `/etc/xlin-sbom/config.json`，
+rpm 以 `%config(noreplace)` 管理同一文件；程序日志默认写入
+`${XDG_STATE_HOME:-$HOME/.local/state}/xlin-sbom/log`，可通过 `XLIN_SBOM_LOG_DIR` 覆盖。
+扫描过程中累积的发起者缓存（originators.json）默认写入
+`${XDG_CACHE_HOME:-$HOME/.cache}/xlin-sbom/originators.json`，可通过 `XLIN_SBOM_CACHE_DIR`
+覆盖；安装目录内的 `/usr/share/xlin-sbom/assist/originators.json` 只作为首次扫描的只读种子
+数据，程序不会向安装目录写入任何文件。
+
 ## 故障排除
 
 ### 1. `docker compose` 执行错误或解析失败

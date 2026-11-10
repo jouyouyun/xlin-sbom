@@ -22,7 +22,7 @@ from pathlib import Path
 def _reexec_with_project_venv_if_needed():
     """若存在项目 .venv 且当前解释器不是它，则切换到 .venv 再执行。
 
-    避免使用系统 python3 时因未安装 tqdm/beartype 等依赖而在 import 阶段失败。
+    避免使用系统 python3 时因未安装 tqdm 等依赖而在 import 阶段失败。
     """
     venv_python = Path(__file__).resolve().parent / ".venv" / "bin" / "python"
     if not venv_python.is_file():

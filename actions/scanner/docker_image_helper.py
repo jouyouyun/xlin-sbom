@@ -28,8 +28,14 @@ import tempfile
 
 import requests
 
-from actions import ASSIST_DIR
-from actions.data_helper import calculate_file_checksums, read_data_from_json, remove_duplicate_files, remove_duplicates
+from actions import ASSIST_ORIGINATORS_SEED
+from actions.data_helper import (
+    calculate_file_checksums,
+    load_originators,
+    read_data_from_json,
+    remove_duplicate_files,
+    remove_duplicates
+)
 from actions.licenses_helper import _extract_deb_license_list, rpm_licenses_scanner
 from actions.package import Package, merge_packages
 from actions.sbom_helper import build_sbom_header
@@ -655,7 +661,7 @@ def _scan_dpkg_rootfs(
 ) -> Dict[str, Any]:
     """扫描 Debian/Ubuntu 系镜像 rootfs 中的 dpkg 数据库。"""
 
-    originators = read_data_from_json(os.path.join(ASSIST_DIR, "originators.json"))
+    originators = load_originators(ASSIST_ORIGINATORS_SEED)
     status_path = os.path.join(rootfs_dir, "var/lib/dpkg/status")
     info_dir = os.path.join(rootfs_dir, "var/lib/dpkg/info")
     package_file_paths, package_md5sums = _read_dpkg_info_files(info_dir)
@@ -724,7 +730,7 @@ def _scan_rpm_rootfs(
 ) -> Dict[str, Any]:
     """扫描 RPM 系镜像 rootfs 中的 RPM 数据库。"""
 
-    originators = read_data_from_json(os.path.join(ASSIST_DIR, "originators.json"))
+    originators = load_originators(ASSIST_ORIGINATORS_SEED)
     db_args = _detect_rpm_db_args(rootfs_dir)
     package_rows = _run_rpm_query(
         rootfs_dir, db_args,

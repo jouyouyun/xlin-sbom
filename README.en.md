@@ -186,6 +186,10 @@ Configuration options:
 
 When `verify_certs` is `true` and `ca_certs` is empty, the tool uses the runtime's default CA bundle. When `ca_certs` is set, that file is used. Setting `verify_certs` to `false` skips certificate verification and should only be used in a controlled intranet because the Elasticsearch server identity is no longer authenticated.
 
+## Runtime Data Locations (installed packages)
+
+When installed from the deb/rpm package, the program directory `/usr/share/xlin-sbom` is treated as read-only data. Logs are written to `${XDG_STATE_HOME:-$HOME/.local/state}/xlin-sbom/log` (override with `XLIN_SBOM_LOG_DIR`), and the accumulated originators cache is written to `${XDG_CACHE_HOME:-$HOME/.cache}/xlin-sbom/originators.json` (override with `XLIN_SBOM_CACHE_DIR`). The bundled `/usr/share/xlin-sbom/assist/originators.json` is only used as the read-only seed for the first scan; the tool never writes into the installation directory.
+
 ## Troubleshooting
 
 ### 1. `docker compose` Execution Error or Parsing Failure

@@ -23,8 +23,10 @@ RUN sed -i \
     python3-pip \
     python3-venv \
     python3-dev \
+    python3-rpm \
     openssl \
     rpm \
+    zstd \
     pkg-config \
     libicu-dev \
     libarchive-dev \
@@ -34,7 +36,7 @@ RUN sed -i \
     && rm -rf /var/lib/apt/lists/*
 
 # 创建并激活虚拟环境
-RUN python3 -m venv /opt/venv
+RUN python3 -m venv --system-site-packages /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
 # 复制项目文件

@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from actions import ASSIST_DIR
+from actions import ASSIST_ORIGINATORS_SEED
 from actions.package import merge_packages
 from actions.sbom_helper import build_sbom_header
 from actions.scanner.relationships_helper import (
@@ -20,7 +20,8 @@ from actions.scanner.relationships_helper import (
     get_deb_relationships
 )
 from actions.data_helper import (
-    save_data_to_json,
+    save_originators,
+    load_originators,
     read_data_from_json,
     remove_duplicates,
     remove_duplicate_files
@@ -32,13 +33,18 @@ from actions.scanner.package_helper import (
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from collections import Counter
+import importlib
 import logging
 import os
 import re
 import tempfile
 import threading
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
-import pycdlib
+# 发行版未提供 python3-pycdlib 时，仅 ISO 扫描不可用，其余功能不受影响。
+try:
+    pycdlib = importlib.import_module('pycdlib')
+except Exception:
+    pycdlib = None
 from tqdm import tqdm
 
 ISO_PATH_TYPES = ("udf", "rockridge", "joliet", "iso9660")
@@ -82,6 +88,9 @@ class IsoEntry:
 
 class PyCdlibIsoReader:
     def __init__(self, iso_path: str):
+        if pycdlib is None:
+            raise RuntimeError(
+                "ISO 扫描需要系统提供 python3-pycdlib（PyCdlib）")
         self._iso = pycdlib.PyCdlib()
         self._iso.open(iso_path)
         self.path_type = _select_iso_path_type(self._iso)
@@ -148,8 +157,7 @@ def _scan_deb_entries(
     file_relationships = []
     licenses = []
 
-    originators_file_path = os.path.join(ASSIST_DIR, 'originators.json')
-    originators = read_data_from_json(originators_file_path)
+    originators = load_originators(ASSIST_ORIGINATORS_SEED)
 
     if workers is None:
         logging.info("使用默认的线程数进行扫描")
@@ -202,7 +210,7 @@ def _scan_deb_entries(
         packages_sbom, files, file_relationships, licenses,
         package_relationships, iso_filename, os_arch, created_time)
 
-    save_data_to_json(originators, originators_file_path)
+    save_originators(originators, ASSIST_ORIGINATORS_SEED)
     return linx_sbom
 
 
@@ -221,8 +229,7 @@ def _scan_rpm_entries(
     licenses = []
     provides_relationships = []
 
-    originators_file_path = os.path.join(ASSIST_DIR, 'originators.json')
-    originators = read_data_from_json(originators_file_path)
+    originators = load_originators(ASSIST_ORIGINATORS_SEED)
 
     if workers is None:
         logging.info("使用默认的线程数进行扫描")
@@ -278,7 +285,7 @@ def _scan_rpm_entries(
         packages_sbom, files, file_relationships, licenses,
         package_relationships, iso_filename, os_arch, created_time)
 
-    save_data_to_json(originators, originators_file_path)
+    save_originators(originators, ASSIST_ORIGINATORS_SEED)
     return linx_sbom
 
 
