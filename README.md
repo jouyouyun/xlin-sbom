@@ -15,9 +15,11 @@
 | Docker | 18.09.1+ | 20.10+ |
 | Docker Compose | 1.27.0+ | 2.0+ |
 | 内存 | 4 GB | 8 GB |
-| 磁盘空间 | 10 GB（含 ISO 临时解析文件及输出文件） | 20 GB |
+| 磁盘空间 | 20 GB（含 ISO 临时解析文件及输出文件） | 40 GB（多 squashfs live ISO） |
 
-> ISO 扫描会直接解析镜像文件系统，不依赖 FUSE、`mount` 或额外的容器挂载权限。
+> ISO 扫描会直接解析镜像文件系统，不依赖 FUSE、`mount` 或额外的容器挂载权限，也不需要 root 或 fakeroot：
+> 以普通用户运行 `unsquashfs` 时仅跳过设备节点与文件属主，不影响软件包与文件清单的识别。
+> 多 squashfs 的 live ISO 需要系统提供 `unsquashfs`（`squashfs-tools`），工作目录空间应不小于各层解压后的总量。
 
 ## 镜像获取与加载
 
@@ -40,6 +42,21 @@ docker compose run --rm linx-xiling [参数]
 ### 1. ISO 镜像扫描（`--iso` / `-i`）
 
 扫描本地 ISO 镜像，识别其中的 RPM 或 DEB 软件包，并生成 SBOM。
+
+对于 UOS、Deepin 等 live 镜像，镜像内容可能分布在多个 squashfs 中：ISO 内的 `filesystem.module`（通常位于 `/live` 或 `/casper` 目录）按从底层到顶层的顺序列出这些 squashfs，启动时由 overlayfs 叠加为最终 rootfs。工具会读取该文件，按相同顺序把各层解包到同一临时目录（后解包的层覆盖先解包的层），然后从合并后的 rootfs 的 dpkg 或 RPM 数据库识别已安装软件包。未提供 `filesystem.module` 时，按 `live`/`casper` 目录中 squashfs 文件名的默认字典序叠加。
+
+该模式需要 `unsquashfs`（`squashfs-tools`）。各层解压后的总大小可能远大于 ISO 本身（例如 UOS 桌面版 25 的 rootfs 解压后约 25 GB），因此工作目录必须落在真实磁盘上：`/tmp` 常为 tmpfs，容量受内存限制，写满时 `unsquashfs` 只会报 `FATAL ERROR: writer: failed to write file ...`。
+
+工作目录的选择规则：
+
+1. `--work-dir` 指定的目录（也可在配置文件 `scan.work_dir` 中固定）；
+2. 未指定时依次尝试系统临时目录（`TMPDIR`）、ISO 所在目录、当前目录，选取第一个可用空间足够的目录，并在日志中打印实际位置；
+3. ISO 内存在 `live/filesystem.size`（live-boot 记录 rootfs 解压后字节数）时，工具在展开前按该值校验空间，不足时立即报错并给出所需空间，不会浪费一次完整解压。
+
+```bash
+xlin-sbom -i ~/Public/ISO/uos-desktop-25-professional-2500-amd64-202607.iso \
+          -o ~/sbom --format spdx23 --work-dir /data/tmp
+```
 
 ```bash
 docker compose run --rm linx-xiling -i /app/data/<镜像文件.iso> -o /app/output --format linx --format spdx
@@ -123,6 +140,7 @@ Linx 格式会输出到一个目录中，并按清单类型拆分为 `packages`�
 | `--help`, `-h` | 显示帮助信息并退出 |
 | `--format {linx,spdx,spdx22,spdx23,spdx3,sbomdf}` | 必填。指定输出格式，可重复指定；`spdx22` 为 SPDX 2.2，`spdx` 与 `spdx23` 为 SPDX 2.3，`spdx3` 为 SPDX 3.0，`sbomdf` 为 GB/T 47020-2026 格式 |
 | `--ecosystem <生态系统>` | 生成 SBOMDF 格式时用于 OSV/Elasticsearch 漏洞查询；源码归档可省略，其他扫描对象必填 |
+| `--work-dir <目录>` | ISO 扫描时展开 squashfs 层的工作目录，需有不小于 rootfs 解压后大小的空闲空间。默认按 `TMPDIR`、ISO 所在目录、当前目录的顺序选取空间足够者；也可在配置文件 `scan.work_dir` 中固定 |
 
 ## 配置文件
 
@@ -137,7 +155,8 @@ Linx 格式会输出到一个目录中，并按清单类型拆分为 `packages`�
     "scan": {
         "disable_tqdm": false,
         "max_workers": null,
-        "platform": "linux/amd64"
+        "platform": "linux/amd64",
+        "work_dir": null
     },
     "source_scan": {
         "include_file_patterns": ["*.py", "*.js", "*LICENSE*"],
@@ -159,6 +178,7 @@ Linx 格式会输出到一个目录中，并按清单类型拆分为 `packages`�
 | `scan.disable_tqdm` | 是否禁用进度条显示 |
 | `scan.max_workers` | 最大并发线程数或进程数；`null` 表示使用程序默认策略 |
 | `scan.platform` | Docker 多架构镜像平台，例如 `linux/amd64`、`linux/arm64` |
+| `scan.work_dir` | ISO 扫描展开 squashfs 层的工作目录；`null` 表示按 `TMPDIR`、ISO 所在目录、当前目录的顺序自动选择空间足够的目录，命令行 `--work-dir` 优先 |
 | `source_scan.include_file_patterns` | 源码包文件级扫描包含模式 |
 | `source_scan.exclude_file_patterns` | 源码包文件级扫描排除模式 |
 | `source_scan.brief` | 源码包扫描时是否跳过文件级许可证扫描和 OSV 依赖识别 |

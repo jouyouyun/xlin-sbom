@@ -24,6 +24,7 @@ RUN sed -i \
     python3-venv \
     python3-dev \
     python3-rpm \
+    squashfs-tools \
     openssl \
     rpm \
     zstd \

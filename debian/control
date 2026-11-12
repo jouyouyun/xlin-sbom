@@ -18,6 +18,7 @@ Depends: ${misc:Depends},
          python3-chardet,
          python3-semantic-version,
          python3-rpm,
+         squashfs-tools,
          openssl,
          rpm,
          zstd
@@ -30,5 +31,5 @@ Description: XiLing SBOM generation tool
  GB/T 47020-2026（SBOMDF）格式的软件物料清单。
  .
  软件包不内置 Python 第三方依赖，统一使用发行版提供的 python3 与
- python3-* 模块；ISO 扫描需要 python3-pycdlib，源码许可证识别需要
- scancode-toolkit。
+ python3-* 模块；ISO 扫描需要 python3-pycdlib，多 squashfs live ISO
+ 还需要 squashfs-tools，源码许可证识别需要 scancode-toolkit。

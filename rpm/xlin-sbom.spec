@@ -22,6 +22,7 @@ Requires:       python3-chardet
 Requires:       python3-semantic_version
 Requires:       python3-rpm
 Requires:       python3-license-expression
+Requires:       squashfs-tools
 Requires:       openssl
 Requires:       rpm
 Requires:       zstd
